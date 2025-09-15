@@ -1,23 +1,36 @@
-# install.packages(c("micEconCES","dplyr","readr","purrr","ggplot2","parallel"))
+options(scipen = 999) # avoids scientific notation unless necessary
+setTimeLimit(cpu = Inf, elapsed = Inf, transient = TRUE)
+
+# ---- PACKAGES ----
+# install.packages(c("micEconCES","dplyr","readr","purrr","ggplot2",
+#                    "parallel","ggpmisc","pheatmap","ggrepel","patchwork","tibble","viridis"))
+
 library(micEconCES)
 library(dplyr)
+library(tidyr)
 library(readr)
 library(purrr)
-library(ggplot2)
 library(furrr)
 library(parallel)
+library(viridis)
+library(ggplot2)
+library(ggpmisc)
+library(ggrepel)
+library(pheatmap)
+library(patchwork)
+library(tibble)
+library(lmtest)
+library(sandwich)
 
-# --- Settings ---
+# ---- SETTINGS ----
 setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation")
-infile    <- "MERGE macro.csv"
+infile <- "MERGE macro.csv"
 
-# Allows R to work with multiple sessions using in parallel the CPU cores (faster runtime but less details while running)
 plan(multisession, workers = parallel::detectCores() - 2)
 
-# --- Load ---
+# ---- DATA ----
 df <- read_csv(infile, show_col_types = TRUE)
 
-# --- Scale for stability ---
 dfS <- df %>%
   group_by(r) %>%
   mutate(
@@ -28,280 +41,608 @@ dfS <- df %>%
   ) %>%
   ungroup()
 
-# --- Grid for rho values ---
-rhoGrid <- seq(-1, 5, by = .05)
+rhoGrid_KL  <- seq(-1, 10, by = 0.2)
+rhoGrid_VAE <- seq(-1, 10, by = 0.2)
 
-# --- helper: extract rho ---
-get_rho_val <- function(fit, which = c("rho1","rho")) {
-  which <- match.arg(which)
-  if (is.null(fit)) return(NA_real_)
-  cf <- coef(fit)
-  if (!is.null(cf[which])) return(as.numeric(cf[which]))
-  if (!is.null(fit$rssArray)) {
-    idx <- which(fit$rssArray == min(fit$rssArray), arr.ind = TRUE)
-    if (which=="rho1") return(fit$rho1Values[idx[1,1]])
-    else               return(fit$rhoValues [idx[1,2]])
-  }
-  NA_real_
-}
 
-# --- estimation per region ---
+# ---- ESTIMATION ----
 estimate_region <- function(d, region_name) {
-  message("Estimating: ", region_name)
+  message("\nEstimating region: ", region_name)
+  d_num <- d %>% transmute(t, Ys, Ks, Ls, Es)
   
-  d_num <- d %>%
-    transmute(
-      t  = as.numeric(t),
-      Ys = Y / mean(Y, na.rm=TRUE),
-      Ks = K / mean(K, na.rm=TRUE),
-      Ls = L / mean(L, na.rm=TRUE),
-      Es = E / mean(E, na.rm=TRUE)
-    )
+  methods <- c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "DE", "SANN")
   
-  # methods to try
-  methods <- c("Kmenta", "LM", "NM", "Nelder-Mead", "PORT", "BFGS", "Newton", "DE", "NM", "CG", "L-BFGS-B")
-  fit_all <- list()
-  times <- list()
+  fit_all   <- setNames(vector("list", length(methods)), methods)
+  conv_all  <- setNames(rep(FALSE, length(methods)), methods)
+  msg_all   <- setNames(rep(NA_character_, length(methods)), methods)
+  times_all <- setNames(rep(NA_real_, length(methods)), methods)
   
   for (m in methods) {
     t0 <- Sys.time()
-    fit_try <- try(
-      cesEst(
-        yName   = "Ys",
-        xNames  = c("Ks","Ls","Es"),
-        tName   = "t",
-        data    = d_num,
-        vrs     = TRUE,
-        multErr = TRUE,
-        method  = m,
-        rho1    = rhoGrid,
-        rho     = rhoGrid,
-        control = list(maxiter = 1000),
-        upper   = c(delta_1 = 1, delta = 1),
-        lower   = c(delta_1 = 0, delta = 0)
-      ),
-      silent = TRUE
-    )
-    t1 <- Sys.time()
-    times[[m]] <- as.numeric(difftime(t1, t0, units = "secs"))
+    start_arg <- NULL; lower_arg <- NULL; upper_arg <- NULL; control_arg <- NULL
     
-    if (!(inherits(fit_try, "try-error") || is.null(fit_try))) {
-      fit_all[[m]] <- fit_try
-      used_method <- m
-      message("✓ Success for ", region_name, " with method: ", m, " (", round(times[[m]],2),"s)")
-    } else {
-      message("✗ Failed with method: ", m)
+    # --- Newton ---
+    if (m == "Newton") {
+      start_arg <- c(
+        gamma     = runif(1, 0.8, 1.2),
+        lambda    = runif(1, -0.01, 0.01),
+        delta_KL  = runif(1, 0.3, 0.7),
+        delta_VAE = runif(1, 0.3, 0.7),
+        nu        = runif(1, 0.8, 1.2),  # >0
+        rho_KL    = runif(1, -0.2, 0.2),
+        rho_VAE   = runif(1, -0.2, 0.2)
+      )
+      # Newton does not take control argument
     }
+    
+    # --- L-BFGS-B ---
+    if (m == "L-BFGS-B") {
+      start_arg <-
+      c(
+        gamma     = 1,
+        lambda    = 0,
+        delta_KL  = 0.5,
+        delta_VAE = 0.5,
+        nu        = 1,
+        rho_KL    = 0.5,
+        rho_VAE   = 0.5
+      )
+      lower_arg <- c(
+        gamma=0.01, lambda=-1, delta_KL=0.01, delta_VAE=0.01,
+        nu=0.01, rho_KL=-2, rho_VAE=-2
+      )
+      upper_arg <- c(
+        gamma=10, lambda=1, delta_KL=0.99, delta_VAE=0.99,
+        nu=10, rho_KL=5, rho_VAE=5
+      )
+      control_arg <- list(maxit = 2000, factr = 1e7)
+    }
+    
+    # --- PORT (nlminb) ---
+    if (m == "PORT") {
+      control_arg <- list(eval.max = 1e4, iter.max = 1e5, reltol = 1e-8)
+    }
+    
+    # --- BFGS ---
+    if (m == "BFGS") {
+      control_arg <- list(maxit = 5000, reltol = 1e-8)
+    }
+    
+    # --- CG ---
+    if (m == "CG") {
+      control_arg <- list(maxit = 5000, reltol = 1e-8)
+    }
+    
+    # --- Nelder-Mead ---
+    if (m %in% c("NM","Nelder-Mead")) {
+      control_arg <- list(maxit = 5000, reltol = 1e-8)
+    }
+    
+    # --- LM (Levenberg-Marquardt) ---
+    if (m == "LM") {
+      control_arg <- list(maxiter = 5000, ftol = 1e-8, maxfev = 5000)
+    }
+    
+    # --- Differential Evolution (DE) ---
+    if (m == "DE") {
+      control_arg <- list(itermax = 500, reltol = 1e-6)
+    }
+    
+    # --- Simulated Annealing (SANN) ---
+    if (m == "SANN") {
+      control_arg <- list(maxit = 1000, temp = 10, tmax = 50)
+    }
+    
+    # --- Run estimation ---
+    # Special run for Newton method
+    if (m == "Newton") {
+      fit_try <- try(
+        suppressWarnings({
+          cesEst(
+            yName="Ys", 
+            xNames=c("Ks","Ls","Es"),
+            tName="t", 
+            data=d_num,
+            vrs=TRUE, 
+            multErr=TRUE, 
+            method=m,
+            rho1=rhoGrid_KL,
+            rho=rhoGrid_VAE,
+            start=start_arg, 
+            lower=lower_arg, 
+            upper=upper_arg
+          )
+        }), silent=TRUE
+      )
+    } else {
+      # Standard run for all other solvers
+      fit_try <- try(
+        suppressWarnings({
+          cesEst(
+            yName="Ys", 
+            xNames=c("Ks","Ls","Es"),
+            tName="t", 
+            data=d_num,
+            vrs=TRUE, 
+            multErr=TRUE, 
+            method=m,
+            rho1=rhoGrid_KL,
+            rho=rhoGrid_VAE,
+            start=start_arg, 
+            lower=lower_arg, 
+            upper=upper_arg,
+            control=control_arg
+          )
+        }), silent=TRUE
+      )
+    }
+    
+    runtime <- as.numeric(difftime(Sys.time(), t0, units="secs"))
+    times_all[m] <- runtime
+    
+    success   <- inherits(fit_try,"cesEst")
+    conv_flag <- if (success && !is.null(fit_try$convergence)) fit_try$convergence else FALSE
+    msg_flag  <- if (inherits(fit_try,"try-error")) as.character(fit_try)[1]
+    else if (success && !is.null(fit_try$message)) fit_try$message else ""
+    
+    fit_all[[m]] <- if (success) fit_try else NULL
+    conv_all[m]  <- conv_flag
+    msg_all[m]   <- msg_flag
+    
+    message(sprintf("  %s %-10s in %.1fs%s",
+                    if (conv_flag) "✓" else "✗", m, runtime,
+                    if (!conv_flag && nzchar(msg_flag)) paste0(" msg: ", msg_flag) else ""))
   }
   
-  if (length(fit_all) == 0) {
-    message("✗✗ All methods failed for ", region_name)
-    return(NULL)
-  } 
-
-# After running all methods, choose the best fit
-  rss_vals <- sapply(fit_all, function(f) f$rss)
-  best_m <- names(which.min(rss_vals))
-  best_fit <- fit_all[[best_m]]
-  
-  attr(best_fit, "method used") <- best_m
-  attr(best_fit, "time used") <- times[[best_m]]
-  attr(best_fit, "all methods") <- names(fit_all)
-  attr(best_fit, "rss_all")  <- rss_vals
-  attr(best_fit, "time_all") <- times
-  
-  return(best_fit)
+  list(fits=fit_all, conv=conv_all, msg=msg_all, times=times_all, data=d_num)
 }
 
-# --- run for all regions ---
-# split the data by region and assign region names
-splits       <- dfS %>% group_split(r, .keep = TRUE)
-region_names <- dfS %>% distinct(r) %>% pull(r)
-
-# Run the CES estimation function for each region and estimation method
-fits <- future_map2(splits, region_names, estimate_region, .progress = TRUE)
 
 
-# --- Extract results ---
-extract_fit <- function(fit, region) {
-  if (is.null(fit)) {
-    return(list(
-      summary    = tibble(r = region, converged = FALSE),
-      residuals  = NULL,
-      fitted     = NULL,
-      grid       = NULL
+
+
+
+
+# ---- EXTRACT RESULTS ----
+extract_region <- function(region_name, region_fits) {
+  if (is.null(region_fits)) return(NULL)
+  
+  diag_tbl     <- tibble()
+  timevary_tbl <- tibble()
+  grid_tbl     <- tibble()
+  
+  for (m in names(region_fits$fits)) {
+    fit_obj   <- region_fits$fits[[m]]
+    conv_flag <- region_fits$conv[[m]] %||% FALSE
+    msg_flag  <- region_fits$msg[[m]] %||% NA_character_
+    runtime   <- region_fits$times[[m]] %||% NA_real_
+    
+    gamma_est <- lambda_est <- delta_KL_est <- delta_VAE_est <- nu_est <- NA_real_
+    rho1 <- rhoT <- sigma_KL <- sigma_VAE <- NA_real_
+    rss_val <- R2_val <- NA_real_
+    iter_val <- NA_integer_
+    aic_val <- bic_val <- NA_real_
+    p_gamma <- p_lambda <- p_delta_KL <- p_delta_VAE <- p_nu <- NA_real_
+    
+    if (!is.null(fit_obj) && inherits(fit_obj,"cesEst")) {
+      s        <- summary(fit_obj)
+      coef_mat <- tryCatch(coef(s), error=function(e) NULL)
+      
+      get_coef <- function(mat, par, field="Estimate") {
+        if (!is.null(mat) && par %in% rownames(mat)) mat[par,field] else NA_real_
+      }
+      
+      gamma_est     <- get_coef(coef_mat,"gamma")
+      lambda_est    <- get_coef(coef_mat,"lambda")
+      delta_KL_est  <- get_coef(coef_mat,"delta_1")
+      delta_VAE_est <- get_coef(coef_mat,"delta")
+      nu_est        <- get_coef(coef_mat,"nu")
+      
+      # Standard errors and p-values
+     # try({
+      #  vc <- vcovHC(fit_obj, type="HC1")
+       # ct <- coeftest(fit_obj, vcov.=vc)
+        #if ("gamma"    %in% rownames(ct)) p_gamma    <- ct["gamma","Pr(>|t|)"]
+        #if ("lambda"   %in% rownames(ct)) p_lambda   <- ct["lambda","Pr(>|t|)"]
+        #if ("delta_1"  %in% rownames(ct)) p_delta_KL  <- ct["delta_1","Pr(>|t|)"]
+        #if ("delta"    %in% rownames(ct)) p_delta_VAE <- ct["delta","Pr(>|t|)"]
+        #if ("nu"       %in% rownames(ct)) p_nu       <- ct["nu","Pr(>|t|)"]
+      #}, silent=TRUE)
+      
+      # Elasticities
+      if (!is.null(fit_obj$allRhoSum)) {
+        best <- fit_obj$allRhoSum %>% slice_min(rss, n=1)
+        rho1 <- best$rho1; rhoT <- best$rho
+      } else {
+        cf <- tryCatch(coef(fit_obj), error=function(e) NULL)
+        rho1 <- if (!is.null(cf) && "rho1" %in% names(cf)) cf[["rho1"]] else NA_real_
+        rhoT <- if (!is.null(cf) && "rho"  %in% names(cf)) cf[["rho"]]  else NA_real_
+      }
+      
+      sigma_KL  <- ifelse(is.finite(1/(1+rho1)), 1/(1+rho1), NA_real_)
+      sigma_VAE <- ifelse(is.finite(1/(1+rhoT)), 1/(1+rhoT), NA_real_)
+      
+      # Goodness of fit and other statistics
+      rss_val  <- fit_obj$rss
+      iter_val <- fit_obj$iter
+      obs  <- log(region_fits$data$Ys + 1e-12)
+      fitv <- log(fit_obj$fitted.values + 1e-12)
+      R2_val <- 1 - sum((obs - fitv)^2)/sum((obs - mean(obs))^2)
+      adjR2_val <- 1 - (1-R2_val)*(length(obs)-1)/(length(obs)-length(coef(fit_obj))-1)
+      
+      aic_val <- tryCatch(AIC(fit_obj), error=function(e) NA_real_)
+      bic_val <- tryCatch(BIC(fit_obj), error=function(e) NA_real_)
+      
+      # Time-varying Total Factor Productivity (TFP)
+      timevary_tbl <- bind_rows(timevary_tbl, tibble(
+        r        = region_name,
+        method   = m,
+        t        = region_fits$data$t,
+        fitted   = as.numeric(fit_obj$fitted.values),
+        residual = as.numeric(fit_obj$residuals),
+        TFP      = gamma_est * exp(lambda_est * region_fits$data$t)
+      ))
+      
+      if (!is.null(fit_obj$allRhoSum) && nrow(fit_obj$allRhoSum) > 0) {
+        grid_tbl <- bind_rows(
+          grid_tbl,
+          fit_obj$allRhoSum %>% mutate(r = region_name, method = m)
+        )
+      }
+    }
+    
+    # Building the regional table of parameters and statistics
+    diag_tbl <- bind_rows(diag_tbl, tibble(
+      r           = region_name,
+      method      = m,
+      rss         = rss_val,
+      R2          = R2_val,
+      adjR2       = adjR2_val,
+      iter        = iter_val,
+      conv        = conv_flag,
+      message     = msg_flag,
+      gamma       = gamma_est,
+      p_gamma     = p_gamma,
+      lambda      = lambda_est,
+      p_lambda    = p_lambda,
+      delta_KL    = delta_KL_est,
+      p_delta_KL  = p_delta_KL,
+      delta_VAE   = delta_VAE_est,
+      p_delta_VAE = p_delta_VAE,
+      nu          = nu_est,
+      p_nu        = p_nu,
+      rho_KL      = rho1,
+      rho_VAE     = rhoT,
+      sigma_KL    = sigma_KL,
+      sigma_VAE   = sigma_VAE,
+      aic         = aic_val,
+      bic         = bic_val,
+      runtime     = runtime
     ))
   }
   
-  cf <- coef(fit)
-  se <- try(sqrt(diag(fit$cov.unscaled)), silent = TRUE)
-  se <- if(inherits(se, "try-error")) rep(NA, length(cf)) else se
-  names(se) <- names(cf)
-  
-  rho1 <- get_rho_val(fit,"rho1")
-  rhoT <- get_rho_val(fit,"rho")
-  
-  # compute R² (explained variance in log space)
-  R2_val <- tryCatch(
-    1 - sum(fit$residuals^2) / sum((log(fit$fitted.values + 1e-12) -
-                                      mean(log(fit$fitted.values + 1e-12)))^2),
-    error = function(e) NA
-  )
-  
-  # compute t-stats and p-values
-  t_stats <- cf / se
-  p_vals <- 2 * (1 - pnorm(abs(t_stats)))
-  
-  summary_tbl <- tibble(
-    r         = region,
-    method    = attr(fit,"method used"),
-    time      = attr(fit,"time used"),
-    converged = fit$convergence,
-    iter      = fit$iter,
-    rss       = fit$rss,
-    R2        = R2_val,
-    
-    gamma     = cf["gamma"],
-    lambda    = cf["lambda"],
-    d_KL      = pmin(pmax(cf["delta_1"], 0), 1),
-    d_VAE     = pmin(pmax(cf["delta"], 0), 1),
-    nu        = if ("nu" %in% names(cf)) cf["nu"] else NA,
-    rho_KL    = rho1,
-    rho_VAE   = rhoT,
-    sigma_KL  = ifelse(is.finite(1/(1+rho1)), 1/(1+rho1), NA),
-    sigma_VAE = ifelse(is.finite(1/(1+rhoT)), 1/(1+rhoT), NA),
-    
-    se_gamma  = se["gamma"],
-    se_lambda = se["lambda"],
-    se_delta1 = se["delta_1"],
-    se_delta  = se["delta"],
-    se_nu     = if ("nu" %in% names(se)) se["nu"] else NA,
-    
-    p_gamma   = p_vals["gamma"],
-    p_lambda  = p_vals["lambda"],
-    p_delta1  = p_vals["delta_1"],
-    p_delta   = p_vals["delta"],
-    p_nu      = if ("nu" %in% names(p_vals)) p_vals["nu"] else NA
+  list(diag=diag_tbl, timevary=timevary_tbl, grid=grid_tbl)
+}
+
+# Region splits
+splits <- dfS %>% group_split(r, .keep=TRUE)
+region_names <- dfS %>% distinct(r) %>% pull(r)
+
+# ---- RUN ALL ----
+fits_all <- future_map2(
+  splits, region_names, estimate_region,
+  .progress=TRUE,
+  .options=furrr_options(
+    packages=c("micEconCES","dplyr","tidyr","purrr","readr"),
+    globals=c("rhoGrid_KL","rhoGrid_VAE"),
+    seed=TRUE
+  ),
+  .env_globals=globalenv()
+)
+
+# --- Extract diagnostics ---
+results <- map2(region_names, fits_all, extract_region)
+
+results_table      <- bind_rows(map(results,"diag"))
+results_table_time <- bind_rows(map(results,"timevary"))
+results_grid       <- bind_rows(compact(map(results,"grid")))
+
+convergence_summary <- results_table %>%
+  select(r, method, conv) %>%
+  distinct() %>%
+  group_by(method) %>%
+  summarise(
+    n_tried   = n(),
+    n_success = sum(conv, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(n_fail = n_tried - n_success) %>%
+  pivot_longer(c(n_success, n_fail), names_to = "status", values_to = "count") %>%
+  mutate(status = ifelse(status == "n_success","Converged","Failed"))
+
+# Creating the best method by region table, converged runs by lowest RSS
+best_methods <- results_table %>%
+  group_by(r) %>%
+  # Prioritize converged runs first, then lowest RSS
+  arrange(desc(conv), rss) %>%
+  slice(1) %>%
+  ungroup()
+
+
+
+
+# ---- IAM TABLE ----
+iam_table <- results_table_time %>%
+  inner_join(
+    best_methods %>% 
+      select(r, method, gamma, nu, delta_KL, delta_VAE, rho_KL, rho_VAE, sigma_KL, sigma_VAE, conv),
+    by = c("r","method")
+  ) %>%
+  distinct(r, t, .keep_all = TRUE) %>%
+  transmute(
+    year   = t,
+    region = r,
+    total_factor_productivity   = TFP,
+    share_capital_valueadded    = delta_KL,
+    share_valueadded_output     = delta_VAE,
+    elasticity_substitution_capital_labour = sigma_KL,
+    elasticity_substitution_valueadded_energy = sigma_VAE,
+    valueadded_CES_exponent     = rho_KL,
+    output_CES_exponent         = rho_VAE,
+    gamma_parameter             = gamma,
+    nu_parameter                = nu,
+    converged                   = conv   # <- cleaner
   )
 
-  diagnostics_tbl <- tibble(
-    r      = region,
-    method = names(attr(fit, "rss_all")),
-    rss    = unlist(attr(fit, "rss_all")),
-    time   = unlist(attr(fit, "time_all"))
-  )
-  
-  residuals_tbl <- tibble(
-    r = region,
-    t = seq_along(fit$residuals),
-    residuals = as.numeric(fit$residuals)
-  )
-  
-  fitted_tbl <- tibble(
-    r = region,
-    t = seq_along(fit$fitted.values),
-    fitted = as.numeric(fit$fitted.values)
-  )
-  
-  tfp_tbl <- tibble(
-    r = region,
-    t = seq_along(fit$fitted.values),
-    TFP = as.numeric(cf["gamma"]) * exp(as.numeric(cf["lambda"]) * seq_along(fit$fitted.values))
-  )
-  
-  grid_tbl <- if (!is.null(fit$allRhoSum)) {
-    fit$allRhoSum %>% mutate(r = region)
-  } else {
-    NULL
-  }
-  
-  return(list(
-    summary    = summary_tbl,
-    diagnostics= diagnostics_tbl,
-    residuals  = residuals_tbl,
-    fitted     = fitted_tbl,
-    grid       = grid_tbl
-  ))
+
+
+# ---- EXPORT ----
+write_csv(results_table, "CES_region_method.csv")
+write_csv(results_table_time, "CES_region_method_year.csv")
+write_csv(results_grid, "CES_gridsearch.csv")
+write_csv(iam_table, "IAM_params.csv")
+
+# Correlation heat maps between parameters
+cor_mat <- results_table %>%
+  select(gamma, lambda, delta_KL, delta_VAE, nu, sigma_KL, sigma_VAE) %>%
+  as.data.frame()
+
+# Drop all-NA columns
+cor_mat <- cor_mat[, colSums(!is.na(cor_mat)) > 0, drop = FALSE]
+
+if (ncol(cor_mat) >= 2) {
+  cor_mat <- cor(cor_mat, use = "pairwise.complete.obs")
+  pheatmap(cor_mat, main = "Parameter Correlations")
+} else {
+  message("Not enough valid data for correlation heatmap.")
 }
 
 
-# Apply to all fits
-results <- map2(fits, region_names, extract_fit)
 
-# Combine summaries into one CSV
-res_summary <- bind_rows(map(results, "summary"))
-residuals_all <- bind_rows(map(results, "residuals"))
-fitted_all    <- bind_rows(map(results, "fitted"))
-grid_all      <- bind_rows(compact(map(results, "grid")))
-IAM_params <- res_summary %>%
-  select(r, d_KL, d_VAE, sigma_KL, sigma_VAE, nu, gamma, lambda, R2, method, time)
+### Statistics graphs
+# Model convergence by method
+convergence_summary %>%
+  ggplot(aes(x = method, y = count, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = count), position = position_dodge(width=0.9), vjust = -0.3, size = 3) +
+  scale_fill_manual(values = c("Failed"="red","Converged"="darkgreen")) +
+  theme_minimal(base_size=12) +
+  labs(title = "Convergence by Method", y = "Number of Runs", x = "Method")
 
-# Export CSV files
-write_csv(res_summary, "CES_summary.csv")
-write_csv(residuals_all, "CES_residuals.csv")
-write_csv(fitted_all, "CES_fitted.csv")
-write_csv(grid_all, "CES_gridsearch.csv")
-write_csv(IAM_params, "IAM_parameters.csv")
+# Convergence heatmap of regions and methods
+conv_df <- results_table %>% distinct(r, method, conv)
+heatmap_matrix <- conv_df %>%
+  mutate(conv = as.integer(conv)) %>%
+  pivot_wider(names_from = method, values_from = conv, values_fill = list(conv = 0)) %>%
+  column_to_rownames("r") %>% as.matrix()
+pheatmap(
+  heatmap_matrix,
+  color = c("red","green"),
+  main = "Convergence Heatmap\n(1 = converged, 0 = failed)"
+)
 
-# Build graphs from results
-# 1. Histogram of elasticities of substitution
-ggplot(res_summary, aes(x = sigma_VAE)) +
-  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
-  theme_minimal() +
-  labs(title = "Distribution of Energy–VA Substitution Elasticities (σ_KLE)",
-       x = "σ_KLE", y = "Count")
-
-ggplot(res_summary, aes(x = as.numeric(sigma_KL))) +
-  geom_histogram(binwidth = 0.1, fill = "darkorange", color = "white") +
-  theme_minimal() +
-  labs(title = "Distribution of Capital–Labor Substitution Elasticities (σ_KL)",
-       x = "σ_KL", y = "Count")
-
-# 2. Regional substitutability profile
-ggplot(res_summary, aes(x = sigma_KL, y = sigma_VAE, label = r)) +
-  geom_point(color="firebrick") +
-  geom_text(size=2.5, vjust=-0.5) +
-  theme_minimal() +
-  labs(title="Elasticities across regions",
-       x="σ_KL (Capital–Labour)", y="σ_VAE (Energy–VA)")
-
-# 3. Distribution of input shares
-res_long <- res_summary %>%
-  select(r, d_KL, d_VAE) %>%
-  tidyr::pivot_longer(cols=c(d_KL,d_VAE), names_to="parameter", values_to="value")
-
-ggplot(res_long, aes(x=reorder(r, value), y=value, fill=parameter)) +
-  geom_col(position="dodge") +
+# Proportion converged
+conv_df %>%
+  distinct(r, method, conv) %>%
+  group_by(method) %>%
+  summarise(prop_converged = mean(conv, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = method, y = prop_converged, fill = method)) +
+  geom_col(show.legend = FALSE) +
   coord_flip() +
-  theme_minimal() +
-  labs(title="Share parameters by region",
-       x="Region", y="Parameter value")
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Proportion of Regions that Converged by Method",
+    x = "", y = "Proportion",
+    caption = expression(paste("Fraction of regions with convergence success"))
+  )
 
-# 4. Runtime vs Fit quality (RSS)
-# --- Combine diagnostics for plotting ---
-res_diagnostics <- bind_rows(map(results, "diagnostics"))
-write_csv(res_diagnostics, "CES_diagnostics.csv")
+# RSS vs Iterations tradeoff
+ggplot(results_table, aes(x = iter, y = rss, color = method)) +
+  geom_point(size = 2, alpha = 0.6) +
+  geom_smooth(method="lm", se=FALSE, formula=y~poly(log(x),2), linetype="dashed") +
+  geom_text_repel(aes(label = r), size = 2, max.overlaps = 10) +
+  scale_y_log10() + scale_x_log10() +
+  theme_classic(base_size = 12) +
+  labs(
+    title   = "Iterations vs Fit Quality",
+    x       = "Iterations (log)", y = "RSS (log)",
+    caption = expression(paste("RSS: Residual Sum of Squares, lower is better"))
+  )
 
-# --- Plot runtime vs fit quality (RSS) ---
-ggplot(res_diagnostics, aes(x = time, y = rss, color = method, label = r)) +
-  geom_point(size = 3, alpha = 0.7) +
-  geom_text(size = 2.5, vjust = -0.8, check_overlap = TRUE) +
-  scale_y_log10() +  # RSS can span orders of magnitude
-  theme_minimal() +
-  labs(title = "Tradeoff: Runtime vs Fit Quality",
-       subtitle = "Across all methods and regions",
-       x = "Runtime (seconds)",
-       y = "Residual Sum of Squares (log scale)",
-       color = "Method")
+# Grid RSS landscapes
+if (nrow(results_grid) > 0) {
+  ggplot(results_grid, aes(x = rho1, y = rho, z = rss, fill = rss)) +
+    geom_raster(interpolate = TRUE) +
+    scale_fill_viridis_c(trans = "log") +
+    facet_wrap(~r, labeller = label_wrap_gen(width=20)) + # cleaner region names
+    theme_minimal() +
+    labs(title = "RSS landscape (ρK-L vs ρVA-E)",
+         x = "ρK-L", y = "ρVA-E", fill = "RSS (log)")
+}
 
-# 5. Observed vs Fitted values from the CES function
-obs_vs_fit <- fitted_all %>%
-  left_join(dfS %>% select(r, t, Ys), by = c("r","t"))
+# Distribution of R²
+ggplot(results_table, aes(x = reorder(r, R2), y = R2, color = method)) +
+  geom_point(size = 2) +
+  coord_flip() +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = expression(R^2 ~ " by Region and Method"),
+    x = "Region (sorted by R²)",
+    y = expression(R^2),
+    caption = expression(paste(R^2, ": model fit quality (1 = perfect fit)"))
+  )
 
-ggplot(obs_vs_fit, aes(x = Ys, y = fitted, color = r)) +
-  geom_point(alpha = 0.6) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  theme_minimal() +
-  labs(title = "Observed vs Fitted Output",
-       x = "Observed (scaled Ys)", y = "Fitted (scaled Ys)")
+
+### Parameter distributions
+# Distribution of coefficients γ and λ
+ggplot(results_table, aes(x = gamma)) +
+  geom_histogram(binwidth = 0.1, fill = "purple", color = "white") +
+  theme_classic(base_size = 12) +
+  labs(
+    title   = "Distribution of γ (TFP intercept)",
+    x       = expression(gamma),
+    y       = "Count",
+    caption = expression(paste(gamma, ": total factor productivity intercept"))
+  )
+
+ggplot(results_table, aes(x = lambda)) +
+  geom_histogram(binwidth = 0.002, fill = "green4", color = "white") +
+  theme_classic(base_size = 12) +
+  labs(
+    title   = "Distribution of λ (TFP growth rate)",
+    x       = expression(lambda),
+    y       = "Count",
+    caption = expression(paste(lambda, ": exponential growth rate of TFP"))
+  )
+
+# Boxplot of All Parameters
+results_table %>%
+  pivot_longer(cols = c("gamma","lambda","delta_KL","delta_KL","nu"),
+               names_to = "param", values_to = "estimate") %>%
+  filter(!is.na(estimate)) %>%
+  ggplot(aes(x = param, y = estimate, fill = param)) +
+  geom_boxplot(show.legend = FALSE, outlier.size = 1) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Distributions of Key Parameter Estimates",
+    x = "Parameter", y = "Value",
+    caption = expression(paste(delta[K-L], ", ", delta[VA-E], ": CES shares; ", nu, ": scale parameter"))
+  )
+
+# Significance of delta_KL and d_VAE
+ggplot(filter(results_table, !is.na(p_delta_KL) & conv == TRUE),
+       aes(x = method, y = delta_KL, fill = (p_delta_KL < 0.05))) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("FALSE" = "grey80", "TRUE" = "steelblue")) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Significance of d[K-L] Across Methods",
+    x = "Method", y = expression(delta[K-L]),
+    caption = expression(paste("Blue: significant (p < 0.05)"))
+  )
+
+ggplot(filter(results_table, !is.na(p_delta_VAE) & conv == TRUE),
+       aes(x = method, y = delta_VAE, fill = (p_delta_VAE < 0.05))) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("FALSE" = "grey80", "TRUE" = "steelblue")) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Significance of d[VA-E] Across Methods",
+    x = "Method", y = expression(delta[VA-E]),
+    caption = expression(paste("Blue: significant (p < 0.05)"))
+  )
+
+### Main insights
+# Elasticities of substitution distribution
+ggplot(filter(results_table, is.finite(sigma_KL)),
+       aes(x = sigma_KL)) +
+  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Distribution of σ[K-L]",
+    x = expression(sigma[K-L]), y = "Count",
+    caption = expression(paste("σ[K-L]: elasticity of substitution between capital and labour"))
+  )
+
+ggplot(filter(results_table, is.finite(sigma_VAE)),
+       aes(x = sigma_VAE)) +
+  geom_histogram(binwidth = 0.1, fill = "darkorange", color = "white") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Distribution of σ[VA-E]",
+    x = expression(sigma[VA-E]), y = "Count",
+    caption = expression(paste("σ[VA-E]: elasticity of substitution between value-added and energy"))
+  )
+
+# Quadrant Analysis
+median_KL  <- median(results_table$sigma_KL, na.rm = TRUE)
+median_VAE <- median(results_table$sigma_VAE, na.rm = TRUE)
+ggplot(filter(results_table, is.finite(sigma_KL) & is.finite(sigma_VAE)),
+       aes(x = sigma_KL, y = sigma_VAE, color = r)) +
+  geom_quadrant_lines(xintercept = median_KL, yintercept = median_VAE, colour = "grey50") +
+  stat_quadrant_counts(
+    xintercept = median_KL, yintercept = median_VAE,
+    aes(label = after_stat(paste0("n=", count)), colour = NULL),
+    colour = "grey20"
+  ) +
+  geom_point(size = 2, alpha = 0.7) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title   = "Elasticity Quadrants: σ[K-L] vs σ[VA-E]",
+    x       = expression(sigma[K-L]), y = expression(sigma[VA-E]),
+    caption = expression(paste("Quadrants split by medians of σ[K-L] and σ[VA-E]"))
+  )
+
+# Optimisation method comparison by region
+best_methods %>%
+  count(method) %>%
+  ggplot(aes(x = method, y = n, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Number of Regions Best Fit by Each Method",
+    x = "Method", y = "Count of Regions"
+  )
+
+
+# Elasticities of substitution by Region (Best Fits)
+best_methods %>%
+  ggplot(aes(x = reorder(r, sigma_KL), y = sigma_KL, fill = conv)) +
+  geom_col() +
+  scale_fill_manual(values = c("TRUE"="lightblue4","FALSE"="red")) +
+  geom_hline(yintercept = c(0.5, 1), linetype = "dashed", color = c("blue","red")) +
+  coord_flip() +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "σ[K-L] by Region (Best Method)",
+    x = "Region", y = expression(sigma[K-L]),
+    caption = expression(paste("Dashed lines: σ = 0.5, σ = 1"))
+  )
+
+# Grid search RSS heatmap
+if (nrow(results_grid) > 0) {
+  grid_samp <- results_grid %>%
+    filter(!is.na(rho1), !is.na(rho), !is.na(rss)) %>%
+    group_by(r, method) %>%
+    filter(n() >= 4) %>%             # ensure enough points per facet
+    slice_head(n = 100) %>%          # cap to avoid massive plots
+    ungroup()
+  
+  if (nrow(grid_samp) > 0) {
+    ggplot(grid_samp, aes(x = rho1, y = rho, z = rss)) +
+      geom_contour_filled() +
+      facet_grid(r ~ method, scales = "free") +
+      theme_minimal(base_size = 12) +
+      labs(
+        title   = "RSS Contour Surfaces",
+        x       = expression(rho[1]), 
+        y       = expression(rho),
+        caption = expression(paste("Diagnostics of grid search landscapes"))
+      )
+  } else {
+    message("No valid grid search data available for plotting.")
+  }
+}
+
 
