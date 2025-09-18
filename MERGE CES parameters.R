@@ -23,7 +23,7 @@ library(lmtest)
 library(sandwich)
 
 # ---- SETTINGS ----
-#setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation")
+setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation")
 infile <- "MERGE macro.csv"
 
 plan(multisession, workers = parallel::detectCores() - 2)
@@ -34,23 +34,27 @@ df <- read_csv(infile, show_col_types = TRUE)
 dfS <- df %>%
   group_by(r) %>%
   mutate(
-    Ys = Y / mean(Y, na.rm = TRUE),
-    Ks = K / mean(K, na.rm = TRUE),
-    Ls = L / mean(L, na.rm = TRUE),
-    Es = E / mean(E, na.rm = TRUE)
+    Ybase = Y[t == 2022][1],
+    Kbase = K[t == 2022][1],
+    Lbase = L[t == 2022][1],
+    Ebase = E[t == 2022][1]
+  ) %>%
+  mutate(
+    Ys = Y/Ybase,
+    Ks = K/Kbase,
+    Ls = L/Lbase,
+    Es = E/Ebase
   ) %>%
   ungroup()
 
-rhoGrid_KL  <- seq(-1, 1, by = 1)
-rhoGrid_VAE <- seq(-1, 1, by = 1)
-
+#rhoGrid_KL  <- c(seq(-0.99, 1, by = 0.25), seq(2, 5, by = 1))
+#rhoGrid_VAE <- c(seq(-0.99, 1, by = 0.25), seq(2, 5, by = 1))
 
 # ---- ESTIMATION ----
 estimate_region <- function(d, region_name) {
   message("\nEstimating region: ", region_name)
   d_num <- d %>% transmute(t, Ys, Ks, Ls, Es)
   
-  # Drop DE (not supported by micEconCES)
   methods <- c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", 
                "Newton", "CG", "L-BFGS-B")
   
@@ -78,15 +82,25 @@ estimate_region <- function(d, region_name) {
       start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
       lower_arg <- c(gamma=1e-6, lambda=-0.1, delta_KL=1e-6, delta_VAE=1e-6, nu=1e-6)
       upper_arg <- c(gamma=10, lambda=0.1, delta_KL=1-1e-6, delta_VAE=1-1e-6, nu=10)
-      control_arg <- list(maxit = 2000, factr = 1e9)
+      control_arg <- list(maxit = 1e6, factr = 1e9)
     }
-    if (m == "PORT") control_arg <- list(eval.max=1e5, iter.max=1e5, reltol=1e-9)
-    if (m == "BFGS") control_arg <- list(maxit=1e5, reltol=1e-8)
-    if (m == "CG")   control_arg <- list(maxit=1e5, reltol=1e-8)
-    if (m %in% c("NM","Nelder-Mead")) control_arg <- list(maxit=5000, reltol=1e-8)
-    if (m == "LM") control_arg <- list(maxiter=1e5, ftol=1e-8, maxfev=5000)
-    if (m == "SANN") control_arg <- list(maxit=1e4, temp=10, tmax=50)
-    if (m == "DE") control_arg <- list(itermax=8e3)
+    if (m == "PORT") control_arg <- list(eval.max=1e5, iter.max=1e6, reltol=1e-8)
+    if (m == "BFGS") {
+      start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
+      lower_arg <- c(delta_KL=1e-6, delta_VAE=1e-6)
+      upper_arg <- c(delta_KL=1-1e-6, delta_VAE=1-1e-6)
+      control_arg <- list(maxit = 1e6, reltol = 1e-8)
+    }
+    if (m == "CG") {
+      start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
+      lower_arg <- c(delta_KL=1e-6, delta_VAE=1e-6)
+      upper_arg <- c(delta_KL=1-1e-6, delta_VAE=1-1e-6)
+      control_arg <- list(maxit = 1e6, reltol = 1e-8)
+    }    
+    if (m %in% c("NM","Nelder-Mead")) control_arg <- list(maxit=1e6, reltol=1e-8)
+    if (m == "LM") control_arg <- list(maxiter=1e6, ftol=1e-8, maxfev=5000)
+    if (m == "SANN") control_arg <- list(maxit=1e5, temp=10, tmax=50)
+    if (m == "DE") control_arg <- list(itermax=8e4)
     
     
     args_list <- list(
@@ -165,15 +179,15 @@ extract_region <- function(region_name, region_fits) {
       nu_est        <- get_coef(coef_mat,"nu")
       
       # Standard errors and p-values
-      # try({
-      #  vc <- vcovHC(fit_obj, type="HC1")
-      # ct <- coeftest(fit_obj, vcov.=vc)
-      #if ("gamma"    %in% rownames(ct)) p_gamma    <- ct["gamma","Pr(>|t|)"]
-      #if ("lambda"   %in% rownames(ct)) p_lambda   <- ct["lambda","Pr(>|t|)"]
-      #if ("delta_1"  %in% rownames(ct)) p_delta_KL  <- ct["delta_1","Pr(>|t|)"]
-      #if ("delta"    %in% rownames(ct)) p_delta_VAE <- ct["delta","Pr(>|t|)"]
-      #if ("nu"       %in% rownames(ct)) p_nu       <- ct["nu","Pr(>|t|)"]
-      #}, silent=TRUE)
+      try({
+        vc <- vcovHC(fit_obj, type="HC1")
+        ct <- coeftest(fit_obj, vcov.=vc)
+        if ("gamma"    %in% rownames(ct)) p_gamma    <- ct["gamma","Pr(>|t|)"]
+        if ("lambda"   %in% rownames(ct)) p_lambda   <- ct["lambda","Pr(>|t|)"]
+        if ("delta_1"  %in% rownames(ct)) p_delta_KL  <- ct["delta_1","Pr(>|t|)"]
+        if ("delta"    %in% rownames(ct)) p_delta_VAE <- ct["delta","Pr(>|t|)"]
+        if ("nu"       %in% rownames(ct)) p_nu       <- ct["nu","Pr(>|t|)"]
+      }, silent=TRUE)
       
       # Elasticities
       if (!is.null(fit_obj$allRhoSum)) {
@@ -269,9 +283,9 @@ fits_all <- future_map2(
     packages=c("micEconCES","dplyr","tidyr","purrr","readr"),
     globals=c("rhoGrid_KL","rhoGrid_VAE","estimate_region","extract_region"),
     seed=TRUE
-  )
+  ),
+  .env_globals=globalenv()
 )
-
 
 
 
@@ -336,7 +350,13 @@ iam_table <- results_table_time %>%
 write_csv(results_table, "CES_region_method.csv")
 write_csv(results_table_time, "CES_region_method_year.csv")
 write_csv(results_grid, "CES_gridsearch.csv")
+write_csv(best_methods, "CES_best_methods.csv")
+write_csv(conv_df, "CES_convergence_region_method.csv")
 write_csv(iam_table, "IAM_params.csv")
+
+# Load previous results when needed
+#results <- readRDS("results_run1.rds")
+
 
 # Correlation heat maps between parameters
 cor_mat <- results_table %>%
@@ -373,7 +393,7 @@ heatmap_matrix <- conv_df %>%
   column_to_rownames("r") %>% as.matrix()
 pheatmap(
   heatmap_matrix,
-  color = c("red","green"),
+  color = c("red","green4"),
   main = "Convergence Heatmap\n(1 = converged, 0 = failed)"
 )
 
@@ -432,7 +452,7 @@ ggplot(results_table, aes(x = reorder(r, R2), y = R2, color = method)) +
 ### Parameter distributions
 # Distribution of coefficients γ and λ
 ggplot(results_table, aes(x = gamma)) +
-  geom_histogram(binwidth = 0.1, fill = "purple", color = "white") +
+  geom_histogram(binwidth = 0.4, fill = "purple", color = "white") +
   theme_classic(base_size = 12) +
   labs(
     title   = "Distribution of γ (TFP intercept)",
@@ -492,7 +512,7 @@ ggplot(filter(results_table, !is.na(p_delta_VAE) & conv == TRUE),
 # Elasticities of substitution distribution
 ggplot(filter(results_table, is.finite(sigma_KL)),
        aes(x = sigma_KL)) +
-  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "white") +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
   theme_minimal(base_size = 12) +
   labs(
     title = "Distribution of σ[K-L]",
@@ -502,7 +522,7 @@ ggplot(filter(results_table, is.finite(sigma_KL)),
 
 ggplot(filter(results_table, is.finite(sigma_VAE)),
        aes(x = sigma_VAE)) +
-  geom_histogram(binwidth = 0.1, fill = "darkorange", color = "white") +
+  geom_histogram(binwidth = 1, fill = "darkorange", color = "white") +
   theme_minimal(base_size = 12) +
   labs(
     title = "Distribution of σ[VA-E]",
@@ -571,6 +591,19 @@ best_methods %>%
     caption = expression(paste("Dashed lines: σ = 0.5, σ = 1"))
   )
 
+best_methods %>%
+  ggplot(aes(x = reorder(r, sigma_VAE), y = sigma_VAE, fill = conv)) +
+  geom_col() +
+  scale_fill_manual(values = c("TRUE"="lightblue4","FALSE"="red")) +
+  geom_hline(yintercept = c(0.5, 1), linetype = "dashed", color = c("blue","red")) +
+  coord_flip() +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "σ[VA-E] by Region (Best Method)",
+    x = "Region", y = expression(sigma[VA-E]),
+    caption = expression(paste("Dashed lines: σ = 0.5, σ = 1"))
+  )
+
 # Grid search RSS heatmap
 if (nrow(results_grid) > 0) {
   grid_samp <- results_grid %>%
@@ -595,5 +628,9 @@ if (nrow(results_grid) > 0) {
     message("No valid grid search data available for plotting.")
   }
 }
+
+
+# Save all results
+saveRDS(results, file = "results_run1.rds")
 
 
