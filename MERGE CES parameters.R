@@ -23,7 +23,7 @@ library(lmtest)
 library(sandwich)
 
 # ---- SETTINGS ----
-setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation")
+#setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation")
 infile <- "MERGE macro.csv"
 
 plan(multisession, workers = parallel::detectCores() - 2)
@@ -41,8 +41,8 @@ dfS <- df %>%
   ) %>%
   ungroup()
 
-rhoGrid_KL  <- seq(-1, 10, by = 0.2)
-rhoGrid_VAE <- seq(-1, 10, by = 0.2)
+rhoGrid_KL  <- seq(-1, 1, by = 1)
+rhoGrid_VAE <- seq(-1, 1, by = 1)
 
 
 # ---- ESTIMATION ----
@@ -50,7 +50,9 @@ estimate_region <- function(d, region_name) {
   message("\nEstimating region: ", region_name)
   d_num <- d %>% transmute(t, Ys, Ks, Ls, Es)
   
-  methods <- c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "DE", "SANN")
+  # Drop DE (not supported by micEconCES)
+  methods <- c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", 
+               "Newton", "CG", "L-BFGS-B")
   
   fit_all   <- setNames(vector("list", length(methods)), methods)
   conv_all  <- setNames(rep(FALSE, length(methods)), methods)
@@ -59,123 +61,51 @@ estimate_region <- function(d, region_name) {
   
   for (m in methods) {
     t0 <- Sys.time()
+    
     start_arg <- NULL; lower_arg <- NULL; upper_arg <- NULL; control_arg <- NULL
     
-    # --- Newton ---
     if (m == "Newton") {
       start_arg <- c(
-        gamma     = runif(1, 0.8, 1.2),
-        lambda    = runif(1, -0.01, 0.01),
-        delta_KL  = runif(1, 0.3, 0.7),
-        delta_VAE = runif(1, 0.3, 0.7),
-        nu        = runif(1, 0.8, 1.2),  # >0
-        rho_KL    = runif(1, -0.2, 0.2),
-        rho_VAE   = runif(1, -0.2, 0.2)
+        gamma     = runif(1, 0.9, 1.1),
+        lambda    = runif(1, -0.005, 0.005),
+        delta_KL  = runif(1, 0.4, 0.6),
+        delta_VAE = runif(1, 0.4, 0.6),
+        nu        = runif(1, 0.9, 1.1)
       )
-      # Newton does not take control argument
+      # no lower/upper/control
     }
-    
-    # --- L-BFGS-B ---
     if (m == "L-BFGS-B") {
-      start_arg <-
-      c(
-        gamma     = 1,
-        lambda    = 0,
-        delta_KL  = 0.5,
-        delta_VAE = 0.5,
-        nu        = 1,
-        rho_KL    = 0.5,
-        rho_VAE   = 0.5
-      )
-      lower_arg <- c(
-        gamma=0.01, lambda=-1, delta_KL=0.01, delta_VAE=0.01,
-        nu=0.01, rho_KL=-2, rho_VAE=-2
-      )
-      upper_arg <- c(
-        gamma=10, lambda=1, delta_KL=0.99, delta_VAE=0.99,
-        nu=10, rho_KL=5, rho_VAE=5
-      )
-      control_arg <- list(maxit = 2000, factr = 1e7)
+      start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
+      lower_arg <- c(gamma=1e-6, lambda=-0.1, delta_KL=1e-6, delta_VAE=1e-6, nu=1e-6)
+      upper_arg <- c(gamma=10, lambda=0.1, delta_KL=1-1e-6, delta_VAE=1-1e-6, nu=10)
+      control_arg <- list(maxit = 2000, factr = 1e9)
     }
+    if (m == "PORT") control_arg <- list(eval.max=1e5, iter.max=1e5, reltol=1e-9)
+    if (m == "BFGS") control_arg <- list(maxit=1e5, reltol=1e-8)
+    if (m == "CG")   control_arg <- list(maxit=1e5, reltol=1e-8)
+    if (m %in% c("NM","Nelder-Mead")) control_arg <- list(maxit=5000, reltol=1e-8)
+    if (m == "LM") control_arg <- list(maxiter=1e5, ftol=1e-8, maxfev=5000)
+    if (m == "SANN") control_arg <- list(maxit=1e4, temp=10, tmax=50)
+    if (m == "DE") control_arg <- list(itermax=8e3)
     
-    # --- PORT (nlminb) ---
-    if (m == "PORT") {
-      control_arg <- list(eval.max = 1e4, iter.max = 1e5, reltol = 1e-8)
-    }
     
-    # --- BFGS ---
-    if (m == "BFGS") {
-      control_arg <- list(maxit = 5000, reltol = 1e-8)
-    }
+    args_list <- list(
+      yName = "Ys",
+      xNames = c("Ks","Ls","Es"),
+      tName = "t",
+      data = d_num,
+      vrs = TRUE,
+      multErr = TRUE,
+      method = m,
+      rho1 = rhoGrid_KL,
+      rho = rhoGrid_VAE
+    )
+    if (!is.null(start_arg))   args_list$start   <- start_arg
+    if (!is.null(lower_arg))   args_list$lower   <- lower_arg
+    if (!is.null(upper_arg))   args_list$upper   <- upper_arg
+    if (!is.null(control_arg)) args_list$control <- control_arg
     
-    # --- CG ---
-    if (m == "CG") {
-      control_arg <- list(maxit = 5000, reltol = 1e-8)
-    }
-    
-    # --- Nelder-Mead ---
-    if (m %in% c("NM","Nelder-Mead")) {
-      control_arg <- list(maxit = 5000, reltol = 1e-8)
-    }
-    
-    # --- LM (Levenberg-Marquardt) ---
-    if (m == "LM") {
-      control_arg <- list(maxiter = 5000, ftol = 1e-8, maxfev = 5000)
-    }
-    
-    # --- Differential Evolution (DE) ---
-    if (m == "DE") {
-      control_arg <- list(itermax = 500, reltol = 1e-6)
-    }
-    
-    # --- Simulated Annealing (SANN) ---
-    if (m == "SANN") {
-      control_arg <- list(maxit = 1000, temp = 10, tmax = 50)
-    }
-    
-    # --- Run estimation ---
-    # Special run for Newton method
-    if (m == "Newton") {
-      fit_try <- try(
-        suppressWarnings({
-          cesEst(
-            yName="Ys", 
-            xNames=c("Ks","Ls","Es"),
-            tName="t", 
-            data=d_num,
-            vrs=TRUE, 
-            multErr=TRUE, 
-            method=m,
-            rho1=rhoGrid_KL,
-            rho=rhoGrid_VAE,
-            start=start_arg, 
-            lower=lower_arg, 
-            upper=upper_arg
-          )
-        }), silent=TRUE
-      )
-    } else {
-      # Standard run for all other solvers
-      fit_try <- try(
-        suppressWarnings({
-          cesEst(
-            yName="Ys", 
-            xNames=c("Ks","Ls","Es"),
-            tName="t", 
-            data=d_num,
-            vrs=TRUE, 
-            multErr=TRUE, 
-            method=m,
-            rho1=rhoGrid_KL,
-            rho=rhoGrid_VAE,
-            start=start_arg, 
-            lower=lower_arg, 
-            upper=upper_arg,
-            control=control_arg
-          )
-        }), silent=TRUE
-      )
-    }
+    fit_try <- try(suppressWarnings(do.call(cesEst, args_list)), silent=TRUE)
     
     runtime <- as.numeric(difftime(Sys.time(), t0, units="secs"))
     times_all[m] <- runtime
@@ -196,10 +126,6 @@ estimate_region <- function(d, region_name) {
   
   list(fits=fit_all, conv=conv_all, msg=msg_all, times=times_all, data=d_num)
 }
-
-
-
-
 
 
 
@@ -239,14 +165,14 @@ extract_region <- function(region_name, region_fits) {
       nu_est        <- get_coef(coef_mat,"nu")
       
       # Standard errors and p-values
-     # try({
+      # try({
       #  vc <- vcovHC(fit_obj, type="HC1")
-       # ct <- coeftest(fit_obj, vcov.=vc)
-        #if ("gamma"    %in% rownames(ct)) p_gamma    <- ct["gamma","Pr(>|t|)"]
-        #if ("lambda"   %in% rownames(ct)) p_lambda   <- ct["lambda","Pr(>|t|)"]
-        #if ("delta_1"  %in% rownames(ct)) p_delta_KL  <- ct["delta_1","Pr(>|t|)"]
-        #if ("delta"    %in% rownames(ct)) p_delta_VAE <- ct["delta","Pr(>|t|)"]
-        #if ("nu"       %in% rownames(ct)) p_nu       <- ct["nu","Pr(>|t|)"]
+      # ct <- coeftest(fit_obj, vcov.=vc)
+      #if ("gamma"    %in% rownames(ct)) p_gamma    <- ct["gamma","Pr(>|t|)"]
+      #if ("lambda"   %in% rownames(ct)) p_lambda   <- ct["lambda","Pr(>|t|)"]
+      #if ("delta_1"  %in% rownames(ct)) p_delta_KL  <- ct["delta_1","Pr(>|t|)"]
+      #if ("delta"    %in% rownames(ct)) p_delta_VAE <- ct["delta","Pr(>|t|)"]
+      #if ("nu"       %in% rownames(ct)) p_nu       <- ct["nu","Pr(>|t|)"]
       #}, silent=TRUE)
       
       # Elasticities
@@ -330,15 +256,25 @@ region_names <- dfS %>% distinct(r) %>% pull(r)
 
 # ---- RUN ALL ----
 fits_all <- future_map2(
-  splits, region_names, estimate_region,
+  splits, region_names,
+  ~ tryCatch(
+    estimate_region(.x, .y),
+    error = function(e) {
+      message("Completely failed region: ", .y, " → ", e$message)
+      list(fits=list(), conv=list(), msg=list(error=e$message), times=list(), data=.x)
+    }
+  ),
   .progress=TRUE,
   .options=furrr_options(
     packages=c("micEconCES","dplyr","tidyr","purrr","readr"),
-    globals=c("rhoGrid_KL","rhoGrid_VAE"),
+    globals=c("rhoGrid_KL","rhoGrid_VAE","estimate_region","extract_region"),
     seed=TRUE
-  ),
-  .env_globals=globalenv()
+  )
 )
+
+
+
+
 
 # --- Extract diagnostics ---
 results <- map2(region_names, fits_all, extract_region)
@@ -391,7 +327,7 @@ iam_table <- results_table_time %>%
     output_CES_exponent         = rho_VAE,
     gamma_parameter             = gamma,
     nu_parameter                = nu,
-    converged                   = conv   # <- cleaner
+    converged                   = conv
   )
 
 
@@ -573,6 +509,21 @@ ggplot(filter(results_table, is.finite(sigma_VAE)),
     x = expression(sigma[VA-E]), y = "Count",
     caption = expression(paste("σ[VA-E]: elasticity of substitution between value-added and energy"))
   )
+
+results_table %>%
+  filter(is.finite(sigma_KL) | is.finite(sigma_VAE)) %>%
+  pivot_longer(cols = c(sigma_KL, sigma_VAE), names_to = "elasticity", values_to = "sigma") %>%
+  ggplot(aes(x = method, y = sigma, fill = elasticity)) +
+  geom_violin(trim = TRUE, alpha = 0.4) +
+  geom_boxplot(width = 0.2, outlier.size = 0.5, position = position_dodge(width=0.9)) +
+  facet_wrap(~elasticity, scales = "free_y", labeller = as_labeller(c(sigma_KL="σ[K-L]", sigma_VAE="σ[VA-E]"))) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Distribution of Substitution Elasticities by Method",
+    x = "Method", y = expression(sigma)
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
 
 # Quadrant Analysis
 median_KL  <- median(results_table$sigma_KL, na.rm = TRUE)
