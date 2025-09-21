@@ -23,13 +23,13 @@ library(lmtest)
 library(sandwich)
 
 # ---- SETTINGS ----
-setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation/-0.99 to -0.95 by 0.04 and -0.95 to 5 by 0.05 and 6 to 80 by 1")
+setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation/fine grid")
 infile <- "MERGE macro.csv"
 
 RUN_ESTIMATION <- FALSE
 
-rhoGrid_KL  <- c(seq(-0.99, -0.75, by = 0.24), seq(-0.75, 5, by = 0.25), seq(6, 100, by = 2))
-rhoGrid_VAE <- c(seq(-0.99, -0.75, by = 0.24), seq(-0.75, 5, by = 0.25), seq(6, 100, by = 2))
+rhoGrid_KL  <- c(seq(-0.9, 0.5, by = 0.02), seq(0.51, 3, by = 0.1), seq(3.5, 19.5, by = 0.5), seq(20, 40, by = 2))
+rhoGrid_VAE <- c(seq(-0.8, 0.5, by = 0.02), seq(0.51, 3, by = 0.1), seq(3.5, 19.5, by = 0.5), seq(20, 40, by = 2))
 
 # Helper functions
 # AIC/BIC from RSS on the log scale (since multErr=TRUE -> we fit log(Y))
@@ -52,7 +52,7 @@ rho_penalty <- as.integer(length(rhoGrid_KL)  > 1) +
 
 on_grid_edge <- function(val, grid, tol = 1e-12) {
   if (length(grid) == 0L) {
-    return(rep(FALSE, length(vals)))
+    return(rep(FALSE, length(val)))
   }
   g <- sort(unique(grid))
   gmin <- g[1]
@@ -405,10 +405,9 @@ results_table_valid <- results_table %>%
     valid = (conv == TRUE) &
       is.finite(delta_KL) & delta_KL > 0 & delta_KL < 1 &
       is.finite(delta_VAE) & delta_VAE > 0 & delta_VAE < 1 &
-      is.finite(gamma) & gamma > 0 & gamma < 1e3 &
-      is.finite(sigma_KL)  & sigma_KL  > 0 & sigma_KL  < 10 &
-      is.finite(sigma_VAE) & sigma_VAE > 0 & sigma_VAE < 10 &
-      !on_edge_KL & !on_edge_VAE
+      is.finite(gamma) & gamma > 0 & gamma < 1e6 &
+      is.finite(sigma_KL)  & sigma_KL  > 0 & sigma_KL  < 100 &
+      is.finite(sigma_VAE) & sigma_VAE > 0 & sigma_VAE < 100
   ) %>%
   mutate(
     invalid_reason = if_else(
@@ -418,9 +417,9 @@ results_table_valid <- results_table %>%
         if_else(conv != TRUE, "no_convergence", NA_character_),
         if_else(!is.finite(delta_KL) | delta_KL <= 0 | delta_KL >= 1, "bad_delta_KL", NA_character_),
         if_else(!is.finite(delta_VAE) | delta_VAE <= 0 | delta_VAE >= 1, "bad_delta_VAE", NA_character_),
-        if_else(!is.finite(gamma)     | gamma     <= 0 | gamma     >= 1e3, "bad_gamma",   NA_character_),
-        if_else(!is.finite(sigma_KL)  | sigma_KL  <= 0 | sigma_KL  >= 10,  "bad_sigma_KL",  NA_character_),
-        if_else(!is.finite(sigma_VAE) | sigma_VAE <= 0 | sigma_VAE >= 10,  "bad_sigma_VAE", NA_character_),
+        if_else(!is.finite(gamma)     | gamma     <= 0 | gamma     >= 1e6, "bad_gamma",   NA_character_),
+        if_else(!is.finite(sigma_KL)  | sigma_KL  <= 0 | sigma_KL  >= 100,  "bad_sigma_KL",  NA_character_),
+        if_else(!is.finite(sigma_VAE) | sigma_VAE <= 0 | sigma_VAE >= 100,  "bad_sigma_VAE", NA_character_),
         if_else(on_edge_KL,  "rho_KL_on_edge",  NA_character_),
         if_else(on_edge_VAE, "rho_VAE_on_edge", NA_character_),
         sep = "|"
