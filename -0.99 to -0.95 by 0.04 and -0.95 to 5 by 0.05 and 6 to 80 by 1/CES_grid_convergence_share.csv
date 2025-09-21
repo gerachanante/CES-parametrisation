@@ -1,0 +1,187 @@
+r,method,grid_points,n_converged,share_converged
+Argentina,L-BFGS-B,4900,4900,1
+Argentina,LM,4900,4320,0.8816326530612245
+Argentina,NM,4900,4900,1
+Argentina,Nelder-Mead,4900,4900,1
+Argentina,Newton,4900,4900,1
+Argentina,PORT,4900,1769,0.3610204081632653
+Australia and New Zealand,L-BFGS-B,4900,4900,1
+Australia and New Zealand,LM,4900,1285,0.26224489795918365
+Australia and New Zealand,NM,4900,4900,1
+Australia and New Zealand,Nelder-Mead,4900,4900,1
+Australia and New Zealand,Newton,4900,4900,1
+Australia and New Zealand,PORT,4900,134,0.027346938775510202
+Brazil,L-BFGS-B,4900,4900,1
+Brazil,LM,4900,3987,0.8136734693877551
+Brazil,NM,4900,4900,1
+Brazil,Nelder-Mead,4900,4900,1
+Brazil,Newton,4900,4900,1
+Brazil,PORT,4900,469,0.09571428571428571
+Canada,L-BFGS-B,4900,4900,1
+Canada,LM,4900,4814,0.9824489795918367
+Canada,NM,4900,4900,1
+Canada,Nelder-Mead,4900,4900,1
+Canada,Newton,4900,4900,1
+Canada,PORT,4900,659,0.13448979591836735
+Caribbean Extended,L-BFGS-B,4900,4900,1
+Caribbean Extended,LM,4900,3281,0.6695918367346939
+Caribbean Extended,NM,4900,4900,1
+Caribbean Extended,Nelder-Mead,4900,4900,1
+Caribbean Extended,Newton,4900,4900,1
+Caribbean Extended,PORT,4900,70,0.014285714285714285
+Central America,L-BFGS-B,4900,4900,1
+Central America,LM,4900,2666,0.5440816326530612
+Central America,NM,4900,4900,1
+Central America,Nelder-Mead,4900,4900,1
+Central America,Newton,4900,4900,1
+Central America,PORT,4900,23,0.004693877551020408
+Central Asia Extended,L-BFGS-B,4900,4900,1
+Central Asia Extended,LM,4900,2306,0.47061224489795916
+Central Asia Extended,NM,4900,4900,1
+Central Asia Extended,Nelder-Mead,4900,4900,1
+Central Asia Extended,Newton,4900,4900,1
+Central Asia Extended,PORT,4900,8,0.0016326530612244899
+Chile,L-BFGS-B,4900,4900,1
+Chile,LM,4900,4799,0.9793877551020408
+Chile,NM,4900,4900,1
+Chile,Nelder-Mead,4900,4900,1
+Chile,Newton,4900,4900,1
+Chile,PORT,4900,928,0.1893877551020408
+China,L-BFGS-B,4900,4900,1
+China,LM,4900,3385,0.6908163265306122
+China,NM,4900,4899,0.9997959183673469
+China,Nelder-Mead,4900,4899,0.9997959183673469
+China,Newton,4900,4900,1
+China,PORT,4900,0,0
+EU27,L-BFGS-B,4900,4900,1
+EU27,LM,4900,1,2.0408163265306123e-4
+EU27,NM,4900,4900,1
+EU27,Nelder-Mead,4900,4900,1
+EU27,Newton,4900,4900,1
+EU27,PORT,4900,35,0.007142857142857143
+Eastern Africa,L-BFGS-B,4900,4900,1
+Eastern Africa,LM,4900,4780,0.9755102040816327
+Eastern Africa,NM,4900,4900,1
+Eastern Africa,Nelder-Mead,4900,4900,1
+Eastern Africa,Newton,4900,4900,1
+Eastern Africa,PORT,4900,197,0.040204081632653065
+India,L-BFGS-B,4900,4900,1
+India,LM,4900,62,0.012653061224489797
+India,NM,4900,4900,1
+India,Nelder-Mead,4900,4900,1
+India,Newton,4900,4900,1
+India,PORT,4900,0,0
+Japan,L-BFGS-B,4900,4900,1
+Japan,LM,4900,3951,0.8063265306122449
+Japan,NM,4900,4900,1
+Japan,Nelder-Mead,4900,4900,1
+Japan,Newton,4900,4900,1
+Japan,PORT,4900,314,0.06408163265306123
+Levant,L-BFGS-B,4900,4900,1
+Levant,LM,4900,2449,0.49979591836734694
+Levant,NM,4900,4900,1
+Levant,Nelder-Mead,4900,4900,1
+Levant,Newton,4900,4900,1
+Levant,PORT,4900,0,0
+Mexico,L-BFGS-B,4900,4900,1
+Mexico,LM,4900,4530,0.9244897959183673
+Mexico,NM,4900,4900,1
+Mexico,Nelder-Mead,4900,4900,1
+Mexico,Newton,4900,4900,1
+Mexico,PORT,4900,629,0.12836734693877552
+Middle Africa,L-BFGS-B,4900,4900,1
+Middle Africa,LM,4900,3608,0.7363265306122448
+Middle Africa,NM,4900,4900,1
+Middle Africa,Nelder-Mead,4900,4900,1
+Middle Africa,Newton,4900,4900,1
+Middle Africa,PORT,4900,213,0.04346938775510204
+Non-EU Europe,L-BFGS-B,4900,4900,1
+Non-EU Europe,LM,4900,4267,0.8708163265306123
+Non-EU Europe,NM,4900,4900,1
+Non-EU Europe,Nelder-Mead,4900,4900,1
+Non-EU Europe,Newton,4900,4900,1
+Non-EU Europe,PORT,4900,299,0.06102040816326531
+Northern Africa,L-BFGS-B,4900,4900,1
+Northern Africa,LM,4900,4206,0.8583673469387755
+Northern Africa,NM,4900,4900,1
+Northern Africa,Nelder-Mead,4900,4900,1
+Northern Africa,Newton,4900,4900,1
+Northern Africa,PORT,4900,61,0.012448979591836735
+Peninsular West Asia,L-BFGS-B,4900,4900,1
+Peninsular West Asia,LM,4900,3632,0.7412244897959184
+Peninsular West Asia,NM,4900,4900,1
+Peninsular West Asia,Nelder-Mead,4900,4900,1
+Peninsular West Asia,Newton,4900,4900,1
+Peninsular West Asia,PORT,4900,133,0.027142857142857142
+Republic of Korea,L-BFGS-B,4900,4900,1
+Republic of Korea,LM,4900,3298,0.6730612244897959
+Republic of Korea,NM,4900,4900,1
+Republic of Korea,Nelder-Mead,4900,4900,1
+Republic of Korea,Newton,4900,4900,1
+Republic of Korea,PORT,4900,122,0.02489795918367347
+Russia,L-BFGS-B,4900,4900,1
+Russia,LM,4900,4801,0.9797959183673469
+Russia,NM,4900,4900,1
+Russia,Nelder-Mead,4900,4900,1
+Russia,Newton,4900,4900,1
+Russia,PORT,4900,451,0.0920408163265306
+South Africa,L-BFGS-B,4900,4900,1
+South Africa,LM,4900,4707,0.9606122448979592
+South Africa,NM,4900,4900,1
+South Africa,Nelder-Mead,4900,4900,1
+South Africa,Newton,4900,4900,1
+South Africa,PORT,4900,542,0.11061224489795918
+South America Cluster,L-BFGS-B,4900,4900,1
+South America Cluster,LM,4900,4193,0.8557142857142858
+South America Cluster,NM,4900,4900,1
+South America Cluster,Nelder-Mead,4900,4900,1
+South America Cluster,Newton,4900,4900,1
+South America Cluster,PORT,4900,4,8.163265306122449e-4
+South-eastern Asia,L-BFGS-B,4900,4900,1
+South-eastern Asia,LM,4900,3472,0.7085714285714285
+South-eastern Asia,NM,4900,4900,1
+South-eastern Asia,Nelder-Mead,4900,4900,1
+South-eastern Asia,Newton,4900,4900,1
+South-eastern Asia,PORT,4900,5,0.0010204081632653062
+Southern Africa Cluster,L-BFGS-B,4900,4900,1
+Southern Africa Cluster,LM,4900,2310,0.4714285714285714
+Southern Africa Cluster,NM,4900,4900,1
+Southern Africa Cluster,Nelder-Mead,4900,4900,1
+Southern Africa Cluster,Newton,4900,4900,1
+Southern Africa Cluster,PORT,4900,334,0.06816326530612245
+Southern Asia Cluster,L-BFGS-B,4900,4900,1
+Southern Asia Cluster,LM,4900,244,0.04979591836734694
+Southern Asia Cluster,NM,4900,4900,1
+Southern Asia Cluster,Nelder-Mead,4900,4900,1
+Southern Asia Cluster,Newton,4900,4900,1
+Southern Asia Cluster,PORT,4900,0,0
+Switzerland,L-BFGS-B,4900,4900,1
+Switzerland,LM,4900,4682,0.9555102040816327
+Switzerland,NM,4900,4900,1
+Switzerland,Nelder-Mead,4900,4900,1
+Switzerland,Newton,4900,4900,1
+Switzerland,PORT,4900,66,0.013469387755102041
+Tropical Pacific Islands,L-BFGS-B,4900,4900,1
+Tropical Pacific Islands,LM,4900,4242,0.8657142857142858
+Tropical Pacific Islands,NM,4900,4900,1
+Tropical Pacific Islands,Nelder-Mead,4900,4900,1
+Tropical Pacific Islands,Newton,4900,4900,1
+Tropical Pacific Islands,PORT,4900,120,0.024489795918367346
+United Kingdom,L-BFGS-B,4900,4900,1
+United Kingdom,LM,4900,3241,0.6614285714285715
+United Kingdom,NM,4900,4900,1
+United Kingdom,Nelder-Mead,4900,4900,1
+United Kingdom,Newton,4900,4900,1
+United Kingdom,PORT,4900,115,0.02346938775510204
+United States,L-BFGS-B,4900,4900,1
+United States,LM,4900,4344,0.8865306122448979
+United States,NM,4900,4900,1
+United States,Nelder-Mead,4900,4900,1
+United States,Newton,4900,4900,1
+United States,PORT,4900,570,0.11632653061224489
+Western Africa,L-BFGS-B,4900,4900,1
+Western Africa,LM,4900,820,0.1673469387755102
+Western Africa,NM,4900,4900,1
+Western Africa,Nelder-Mead,4900,4900,1
+Western Africa,Newton,4900,4900,1
+Western Africa,PORT,4900,26,0.005306122448979592

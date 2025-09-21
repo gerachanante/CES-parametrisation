@@ -1,0 +1,187 @@
+r,method,conv
+Argentina,LM,TRUE
+Argentina,NM,TRUE
+Argentina,Nelder-Mead,TRUE
+Argentina,PORT,TRUE
+Argentina,Newton,TRUE
+Argentina,L-BFGS-B,TRUE
+Australia and New Zealand,LM,TRUE
+Australia and New Zealand,NM,TRUE
+Australia and New Zealand,Nelder-Mead,TRUE
+Australia and New Zealand,PORT,TRUE
+Australia and New Zealand,Newton,TRUE
+Australia and New Zealand,L-BFGS-B,TRUE
+Brazil,LM,FALSE
+Brazil,NM,TRUE
+Brazil,Nelder-Mead,TRUE
+Brazil,PORT,TRUE
+Brazil,Newton,TRUE
+Brazil,L-BFGS-B,TRUE
+Canada,LM,TRUE
+Canada,NM,TRUE
+Canada,Nelder-Mead,TRUE
+Canada,PORT,TRUE
+Canada,Newton,TRUE
+Canada,L-BFGS-B,TRUE
+Caribbean Extended,LM,TRUE
+Caribbean Extended,NM,TRUE
+Caribbean Extended,Nelder-Mead,TRUE
+Caribbean Extended,PORT,FALSE
+Caribbean Extended,Newton,TRUE
+Caribbean Extended,L-BFGS-B,TRUE
+Central America,LM,FALSE
+Central America,NM,TRUE
+Central America,Nelder-Mead,TRUE
+Central America,PORT,FALSE
+Central America,Newton,TRUE
+Central America,L-BFGS-B,TRUE
+Central Asia Extended,LM,FALSE
+Central Asia Extended,NM,TRUE
+Central Asia Extended,Nelder-Mead,TRUE
+Central Asia Extended,PORT,FALSE
+Central Asia Extended,Newton,TRUE
+Central Asia Extended,L-BFGS-B,TRUE
+Chile,LM,TRUE
+Chile,NM,TRUE
+Chile,Nelder-Mead,TRUE
+Chile,PORT,TRUE
+Chile,Newton,TRUE
+Chile,L-BFGS-B,TRUE
+China,LM,FALSE
+China,NM,TRUE
+China,Nelder-Mead,TRUE
+China,PORT,FALSE
+China,Newton,TRUE
+China,L-BFGS-B,TRUE
+Eastern Africa,LM,TRUE
+Eastern Africa,NM,TRUE
+Eastern Africa,Nelder-Mead,TRUE
+Eastern Africa,PORT,TRUE
+Eastern Africa,Newton,TRUE
+Eastern Africa,L-BFGS-B,TRUE
+EU27,LM,FALSE
+EU27,NM,TRUE
+EU27,Nelder-Mead,TRUE
+EU27,PORT,FALSE
+EU27,Newton,TRUE
+EU27,L-BFGS-B,TRUE
+India,LM,FALSE
+India,NM,TRUE
+India,Nelder-Mead,TRUE
+India,PORT,FALSE
+India,Newton,TRUE
+India,L-BFGS-B,TRUE
+Japan,LM,TRUE
+Japan,NM,TRUE
+Japan,Nelder-Mead,TRUE
+Japan,PORT,FALSE
+Japan,Newton,TRUE
+Japan,L-BFGS-B,TRUE
+Levant,LM,FALSE
+Levant,NM,TRUE
+Levant,Nelder-Mead,TRUE
+Levant,PORT,FALSE
+Levant,Newton,TRUE
+Levant,L-BFGS-B,TRUE
+Mexico,LM,FALSE
+Mexico,NM,TRUE
+Mexico,Nelder-Mead,TRUE
+Mexico,PORT,TRUE
+Mexico,Newton,TRUE
+Mexico,L-BFGS-B,TRUE
+Middle Africa,LM,TRUE
+Middle Africa,NM,TRUE
+Middle Africa,Nelder-Mead,TRUE
+Middle Africa,PORT,TRUE
+Middle Africa,Newton,TRUE
+Middle Africa,L-BFGS-B,TRUE
+Non-EU Europe,LM,TRUE
+Non-EU Europe,NM,TRUE
+Non-EU Europe,Nelder-Mead,TRUE
+Non-EU Europe,PORT,TRUE
+Non-EU Europe,Newton,TRUE
+Non-EU Europe,L-BFGS-B,TRUE
+Northern Africa,LM,TRUE
+Northern Africa,NM,TRUE
+Northern Africa,Nelder-Mead,TRUE
+Northern Africa,PORT,FALSE
+Northern Africa,Newton,TRUE
+Northern Africa,L-BFGS-B,TRUE
+Peninsular West Asia,LM,FALSE
+Peninsular West Asia,NM,TRUE
+Peninsular West Asia,Nelder-Mead,TRUE
+Peninsular West Asia,PORT,FALSE
+Peninsular West Asia,Newton,TRUE
+Peninsular West Asia,L-BFGS-B,TRUE
+Republic of Korea,LM,FALSE
+Republic of Korea,NM,TRUE
+Republic of Korea,Nelder-Mead,TRUE
+Republic of Korea,PORT,FALSE
+Republic of Korea,Newton,TRUE
+Republic of Korea,L-BFGS-B,TRUE
+Russia,LM,TRUE
+Russia,NM,TRUE
+Russia,Nelder-Mead,TRUE
+Russia,PORT,TRUE
+Russia,Newton,TRUE
+Russia,L-BFGS-B,TRUE
+South Africa,LM,TRUE
+South Africa,NM,TRUE
+South Africa,Nelder-Mead,TRUE
+South Africa,PORT,FALSE
+South Africa,Newton,TRUE
+South Africa,L-BFGS-B,TRUE
+South America Cluster,LM,TRUE
+South America Cluster,NM,TRUE
+South America Cluster,Nelder-Mead,TRUE
+South America Cluster,PORT,FALSE
+South America Cluster,Newton,TRUE
+South America Cluster,L-BFGS-B,TRUE
+South-eastern Asia,LM,TRUE
+South-eastern Asia,NM,TRUE
+South-eastern Asia,Nelder-Mead,TRUE
+South-eastern Asia,PORT,FALSE
+South-eastern Asia,Newton,TRUE
+South-eastern Asia,L-BFGS-B,TRUE
+Southern Africa Cluster,LM,TRUE
+Southern Africa Cluster,NM,TRUE
+Southern Africa Cluster,Nelder-Mead,TRUE
+Southern Africa Cluster,PORT,TRUE
+Southern Africa Cluster,Newton,TRUE
+Southern Africa Cluster,L-BFGS-B,TRUE
+Southern Asia Cluster,LM,FALSE
+Southern Asia Cluster,NM,TRUE
+Southern Asia Cluster,Nelder-Mead,TRUE
+Southern Asia Cluster,PORT,FALSE
+Southern Asia Cluster,Newton,TRUE
+Southern Asia Cluster,L-BFGS-B,TRUE
+Switzerland,LM,TRUE
+Switzerland,NM,TRUE
+Switzerland,Nelder-Mead,TRUE
+Switzerland,PORT,TRUE
+Switzerland,Newton,TRUE
+Switzerland,L-BFGS-B,TRUE
+Tropical Pacific Islands,LM,FALSE
+Tropical Pacific Islands,NM,TRUE
+Tropical Pacific Islands,Nelder-Mead,TRUE
+Tropical Pacific Islands,PORT,TRUE
+Tropical Pacific Islands,Newton,TRUE
+Tropical Pacific Islands,L-BFGS-B,TRUE
+United Kingdom,LM,TRUE
+United Kingdom,NM,TRUE
+United Kingdom,Nelder-Mead,TRUE
+United Kingdom,PORT,TRUE
+United Kingdom,Newton,TRUE
+United Kingdom,L-BFGS-B,TRUE
+United States,LM,TRUE
+United States,NM,TRUE
+United States,Nelder-Mead,TRUE
+United States,PORT,TRUE
+United States,Newton,TRUE
+United States,L-BFGS-B,TRUE
+Western Africa,LM,TRUE
+Western Africa,NM,TRUE
+Western Africa,Nelder-Mead,TRUE
+Western Africa,PORT,FALSE
+Western Africa,Newton,TRUE
+Western Africa,L-BFGS-B,TRUE
