@@ -1,4 +1,5 @@
 options(scipen = 999) # avoids scientific notation unless necessary
+setTimeLimit(cpu = Inf, elapsed = Inf, transient = TRUE)
 
 # ---- PACKAGES ----
 #install.packages(c("micEconCES","dplyr","readr","purrr","parallel","tibble","progressr"))
@@ -20,33 +21,34 @@ options(future.wait.timeout = 0)   # disables waiting timeout
 setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation/-.9 to 1 by 0.15, 1.5 to 5 by 0.5, 10, 50, 100")
 infile <- "MERGE macro.csv"
 
+# TRUE to run a fresh estimation or FALSE to reuse saved results (.rds file)
 RUN_ESTIMATION <- TRUE
 
 # Full grid
-#rhoGrid_KL  <- c(seq(-0.86, 0.4, by = 0.02), seq(0.5, 3, by = 0.1), 4, 5, 10, 15, 20, 30, 50, 100)
+#rhoGrid_KL <- c(seq(-0.86, 0.4, by = 0.02), seq(0.5, 3, by = 0.1), 4, 5, 10, 15, 20, 30, 50, 100)
 #rhoGrid_VAE <- c(seq(-0.8, 0.4, by = 0.02), seq(0.5, 3, by = 0.1), 4, 5, 10, 15, 20, 30, 50, 100)
 
 # Test grid
-rhoGrid_KL  <- c(seq(-0.9, 1, by = 0.15), seq(1.5, 5, by = 0.5), 10, 50, 100)
+rhoGrid_KL <- c(seq(-0.9, 1, by = 0.15), seq(1.5, 5, by = 0.5), 10, 50, 100)
 rhoGrid_VAE <- c(seq(-0.9, 1, by = 0.15), seq(1.5, 5, by = 0.5), 10, 50, 100)
 
 # Helper functions
-# AIC/BIC from RSS on the log scale (since multErr=TRUE -> we fit log(Y))
+# Log scale modification of information criteria: AIC, BIC, AICc from residual sums of squares
 aic_bic_from_rss <- function(resid_log, k, add_k_rho = 0L) {
   n   <- length(resid_log)
   RSS <- sum(resid_log^2)
   k0  <- k + add_k_rho
-  AIC <- n * log(RSS / n) + 2 * k0
-  BIC <- n * log(RSS / n) + k0 * log(n)
-  AICc <- if (n - k0 - 1 > 0) AIC + (2*k0*(k0+1))/(n - k0 - 1) else NA_real_
+  AIC <- n*log(RSS/n) + 2*k0
+  BIC <- n*log(RSS/n) + k0*log(n)
+  AICc <- if (n - k0 - 1 > 0) AIC + (2*k0*(k0 + 1))/(n - k0 - 1) else NA_real_
   list(AIC = AIC, BIC = BIC, AICc = AICc, RSS = RSS, n = n, k = k0)
 }
 
-# how many rhos to count as “parameters” (conservative)
-rho_penalty <- as.integer(length(rhoGrid_KL)  > 1) +
+# Counts number of rho treated as parameters for conservative AIC penalties
+rho_penalty <- as.integer(length(rhoGrid_KL) > 1) +
   as.integer(length(rhoGrid_VAE) > 1)
 
-
+# Custom operator function to return a fallback value if the left side is NULL or NA
 `%||%` <- function(x, y) {
   if (is.null(x) || length(x) == 0L || isTRUE(all(is.na(x)))) {
     y
@@ -56,7 +58,7 @@ rho_penalty <- as.integer(length(rhoGrid_KL)  > 1) +
   }
 }
 
-# ---- SAFE EXTRACTION HELPERS ----
+# Extractor of boolean TRUE/FALSE defaults
 safe_bool <- function(x, default = FALSE) {
   if (is.null(x) || length(x) == 0L || all(is.na(x))) {
     default
@@ -66,6 +68,7 @@ safe_bool <- function(x, default = FALSE) {
   }
 }
 
+# Extractor of text defaults
 safe_chr <- function(x, default = NA_character_) {
   if (is.null(x) || length(x) == 0L || all(is.na(x))) {
     default
@@ -74,6 +77,7 @@ safe_chr <- function(x, default = NA_character_) {
   }
 }
 
+# Extractor of number defaults
 safe_num <- function(x, default = NA_real_) {
   if (is.null(x) || length(x) == 0L || all(is.na(x))) {
     default
@@ -82,8 +86,7 @@ safe_num <- function(x, default = NA_real_) {
   }
 }
 
-
-
+# Detects if the rho values are at the edge of their respective grids
 on_grid_edge <- function(val, grid, tol = 1e-12) {
   if (length(grid) == 0L) {
     return(rep(FALSE, length(val)))
@@ -95,6 +98,7 @@ on_grid_edge <- function(val, grid, tol = 1e-12) {
   near(val, gmin, tol = tol) | near(val, gmax, tol = tol)
 }
 
+# Standardises the coefficients across different summary formats
 coef_table_safe <- function(fit_obj) {
   # Try several common locations/dispatch paths
   try_list <- list(
@@ -123,12 +127,12 @@ coef_get <- function(cm, par, col = "Estimate") {
   NA_real_
 }
 
-# Some solvers expose iterations in different places; try them in order
+# Tries different approaches to extract the number of iterations from the solvers
 iter_safe <- function(fit_obj) {
   candidates <- list(
-    tryCatch(as.numeric(fit_obj$iter),       error = function(e) NA_real_),
+    tryCatch(as.numeric(fit_obj$iter), error = function(e) NA_real_),
     tryCatch(as.numeric(fit_obj$iterations), error = function(e) NA_real_),
-    tryCatch(as.numeric(fit_obj$niter),      error = function(e) NA_real_),
+    tryCatch(as.numeric(fit_obj$niter), error = function(e) NA_real_),
     tryCatch(as.numeric(fit_obj$counts[["function"]]), error = function(e) NA_real_),
     tryCatch(as.numeric(fit_obj$optim$counts[["function"]]), error = function(e) NA_real_)
   )
@@ -143,7 +147,7 @@ iter_safe <- function(fit_obj) {
 
 # ---- ESTIMATION ----
 if (isTRUE(RUN_ESTIMATION)) {
-  # Run in multiple sessions for faster solve times
+  # Run in multiple sessions for faster solve times. Includes a safe fallback to sequential solve if it fails
   suppressWarnings({
     tryCatch({
       future::plan(future::multisession, workers = max(1, parallel::detectCores() - 1))
@@ -172,7 +176,7 @@ if (isTRUE(RUN_ESTIMATION)) {
     ) %>%
     ungroup()
 
-  # Region estimation
+  # Region estimation loop
   estimate_region <- function(d, region_name) {
     message("\nEstimating region: ", region_name)
     d_num <- d %>% transmute(t, Ys, Ks, Ls, Es)
@@ -182,9 +186,9 @@ if (isTRUE(RUN_ESTIMATION)) {
     #opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "PORT", "Newton", "L-BFGS-B"))
       opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
     
-    fit_all   <- setNames(vector("list", length(opt_methods)), opt_methods)
-    conv_all  <- setNames(rep(FALSE, length(opt_methods)), opt_methods)
-    msg_all   <- setNames(rep(NA_character_, length(opt_methods)), opt_methods)
+    fit_all <- setNames(vector("list", length(opt_methods)), opt_methods)
+    conv_all <- setNames(rep(FALSE, length(opt_methods)), opt_methods)
+    msg_all <- setNames(rep(NA_character_, length(opt_methods)), opt_methods)
     times_all <- setNames(rep(NA_real_, length(opt_methods)), opt_methods)
     
     for (m in opt_methods) {
@@ -194,52 +198,52 @@ if (isTRUE(RUN_ESTIMATION)) {
       
       if (m == "Newton") {
         start_arg <- c(
-          gamma     = runif(1, 0.9, 1.1),
-          lambda    = runif(1, -0.005, 0.005),
-          delta_KL  = runif(1, 0.4, 0.6),
+          gamma = runif(1, 0.9, 1.1),
+          lambda = runif(1, -0.005, 0.005),
+          delta_KL = runif(1, 0.4, 0.6),
           delta_VAE = runif(1, 0.4, 0.6),
-          nu        = runif(1, 0.9, 1.1)
+          nu = runif(1, 0.9, 1.1)
         )
         # no lower/upper/control
       }
       if (m == "L-BFGS-B") {
-        start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
-        lower_arg <- c(gamma=0.1, lambda=-0.3, delta_KL=0.1, delta_VAE=0.1, nu=0.3)
-        upper_arg <- c(gamma=10, lambda=0.3, delta_KL=0.9, delta_VAE=0.9, nu=5)
+        start_arg <- c(gamma = 1, lambda = 0.001, delta_KL = 0.5, delta_VAE = 0.5, nu = 1)
+        lower_arg <- c(gamma = 0.1, lambda = -0.3, delta_KL = 0.1, delta_VAE = 0.1, nu = 0.3)
+        upper_arg <- c(gamma = 10, lambda = 0.3, delta_KL = 0.9, delta_VAE = 0.9, nu = 5)
         control_arg <- list(maxit = 1000, factr = 1e9)
       }
       if (m == "PORT") control_arg <- list(eval.max=1e5, iter.max=2e4, reltol=1e-8)
       if (m == "BFGS") {
-        start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
-        lower_arg <- c(delta_KL=0.1, delta_VAE=0.1)
-        upper_arg <- c(delta_KL=0.9, delta_VAE=0.9)
+        start_arg <- c(gamma = 1, lambda = 0.001, delta_KL = 0.5, delta_VAE = 0.5, nu = 1)
+        lower_arg <- c(delta_KL = 0.1, delta_VAE = 0.1)
+        upper_arg <- c(delta_KL = 0.9, delta_VAE = 0.9)
         control_arg <- list(maxit = 1000, reltol = 1e-8)
       }
       if (m == "CG") {
-        start_arg <- c(gamma=1, lambda=0.001, delta_KL=0.5, delta_VAE=0.5, nu=1)
-        lower_arg <- c(delta_KL=0.1, delta_VAE=0.1)
-        upper_arg <- c(delta_KL=0.9, delta_VAE=0.9)
+        start_arg <- c(gamma = 1, lambda = 0.001, delta_KL = 0.5, delta_VAE = 0.5, nu = 1)
+        lower_arg <- c(delta_KL = 0.1, delta_VAE = 0.1)
+        upper_arg <- c(delta_KL = 0.9, delta_VAE = 0.9)
         control_arg <- list(maxit = 500, reltol = 1e-8)
       }    
       if (m %in% c("NM","Nelder-Mead")) {
-        lower_arg <- c(delta_KL=0.1, delta_VAE=0.1)
-        upper_arg <- c(delta_KL=0.9, delta_VAE=0.9)
-        control_arg <- list(maxit=5000, reltol=1e-8)
+        lower_arg <- c(delta_KL = 0.1, delta_VAE = 0.1)
+        upper_arg <- c(delta_KL = 0.9, delta_VAE = 0.9)
+        control_arg <- list(maxit = 5000, reltol = 1e-8)
       }
       if (m == "LM") {
-        lower_arg <- c(delta_KL=0.1, delta_VAE=0.1)
-        upper_arg <- c(delta_KL=0.9, delta_VAE=0.9)
-        control_arg <- list(maxiter=10000, ftol=1e-8, maxfev=5000)
+        lower_arg <- c(delta_KL = 0.1, delta_VAE = 0.1)
+        upper_arg <- c(delta_KL = 0.9, delta_VAE = 0.9)
+        control_arg <- list(maxiter = 10000, ftol = 1e-8, maxfev = 5000)
       }
       if (m == "SANN") {
-        lower_arg <- c(delta_KL=0.1, delta_VAE=0.1)
-        upper_arg <- c(delta_KL=0.9, delta_VAE=0.9)
-        control_arg <- list(maxit=5000, temp=10, tmax=50)
+        lower_arg <- c(delta_KL = 0.1, delta_VAE = 0.1)
+        upper_arg <- c(delta_KL = 0.9, delta_VAE = 0.9)
+        control_arg <- list(maxit = 5000, temp = 10, tmax = 50)
       }
       if (m == "DE") {
-        lower_arg <- c(gamma=0.1, lambda=-0.3, delta_KL=0.1, delta_VAE=0.1, nu=0.3)
-        upper_arg <- c(gamma=10, lambda=0.3, delta_KL=0.9, delta_VAE=0.9, nu=5)
-        control_arg <- list(itermax=100)
+        lower_arg <- c(gamma = 0.1, lambda = -0.3, delta_KL = 0.1, delta_VAE = 0.1, nu = 0.3)
+        upper_arg <- c(gamma = 10, lambda = 0.3, delta_KL = 0.9, delta_VAE = 0.9, nu = 5)
+        control_arg <- list(itermax = 100)
       }
       
       args_list <- list(
@@ -254,9 +258,9 @@ if (isTRUE(RUN_ESTIMATION)) {
         rho = rhoGrid_VAE,
         returnGridAll = TRUE
         )
-      if (!is.null(start_arg))   args_list$start   <- start_arg
-      if (!is.null(lower_arg))   args_list$lower   <- lower_arg
-      if (!is.null(upper_arg))   args_list$upper   <- upper_arg
+      if (!is.null(start_arg)) args_list$start <- start_arg
+      if (!is.null(lower_arg)) args_list$lower <- lower_arg
+      if (!is.null(upper_arg)) args_list$upper <- upper_arg
       if (!is.null(control_arg)) args_list$control <- control_arg
       
       fit_try <- try(
@@ -269,24 +273,25 @@ if (isTRUE(RUN_ESTIMATION)) {
       runtime <- as.numeric(difftime(Sys.time(), t0, units="secs"))
       times_all[[m]] <- runtime
       
-      success   <- inherits(fit_try,"cesEst")
+      success <- inherits(fit_try,"cesEst")
       conv_flag <- if (success && !is.null(fit_try$convergence)) fit_try$convergence else FALSE
-      msg_flag  <- if (inherits(fit_try,"try-error")) as.character(fit_try)[1]
+      msg_flag <- if (inherits(fit_try,"try-error")) as.character(fit_try)[1]
       else if (success && !is.null(fit_try$message)) fit_try$message else ""
       
       fit_all[[m]] <- if (success) fit_try else NULL
-      conv_all[[m]]  <- conv_flag
-      msg_all[[m]]   <- msg_flag
+      conv_all[[m]] <- conv_flag
+      msg_all[[m]] <- msg_flag
       
       base::message(sprintf("  %s %-10s in %.1fs%s",
                             if (conv_flag) "✓" else "✗", m, runtime,
                             if (!conv_flag && nzchar(msg_flag)) paste0(" msg: ", msg_flag) else ""))
     }
     
-    list(fits=fit_all, conv=conv_all, msg=msg_all, times=times_all, data=d_num)
+    list(fits = fit_all, conv = conv_all, msg = msg_all, times = times_all, data = d_num)
 }
 
   # ---- EXTRACT RESULTS ----
+  # This function builds a parameter grid from the rhos tested, attaches coefficient estimates, flags run validity and produces a table per region/method/grid point
   extract_region <- function(region_name, region_fits) {
     if (is.null(region_fits) || is.null(region_fits$data) || length(region_fits$fits) == 0L) {
       return(tibble(
@@ -315,10 +320,10 @@ if (isTRUE(RUN_ESTIMATION)) {
     grid_tbl <- tibble()
     
     for (m in names(region_fits$fits)) {
-      fit_obj   <- region_fits$fits[[m]]
+      fit_obj <- region_fits$fits[[m]]
       conv_flag <- safe_bool(region_fits$conv[[m]], FALSE)
-      msg_flag  <- safe_chr(region_fits$msg[[m]], NA_character_)
-      runtime   <- safe_num(region_fits$times[[m]], NA_real_)
+      msg_flag <- safe_chr(region_fits$msg[[m]], NA_character_)
+      runtime <- safe_num(region_fits$times[[m]], NA_real_)
 
       # Build the full grid
       full_grid <- expand_grid(rho_KL = rhoGrid_KL, rho_VAE = rhoGrid_VAE) %>%
@@ -330,9 +335,9 @@ if (isTRUE(RUN_ESTIMATION)) {
           n_grid = nrow(expand_grid(rho_KL = rhoGrid_KL, rho_VAE = rhoGrid_VAE)),
           runtime_total = runtime,
           runtime_per_grid = runtime / n_grid,
-          sigma_KL  = ifelse(is.finite(1/(1+rho_KL)), 1/(1+rho_KL), NA_real_),
+          sigma_KL = ifelse(is.finite(1/(1+rho_KL)), 1/(1+rho_KL), NA_real_),
           sigma_VAE = ifelse(is.finite(1/(1+rho_VAE)),  1/(1+rho_VAE),  NA_real_),
-          on_edge_KL  = on_grid_edge(rho_KL, rhoGrid_KL),
+          on_edge_KL = on_grid_edge(rho_KL, rhoGrid_KL),
           on_edge_VAE = on_grid_edge(rho_VAE,  rhoGrid_VAE),
           
           rss = NA_real_,
@@ -398,9 +403,9 @@ if (isTRUE(RUN_ESTIMATION)) {
             if (length(ix) == 0) NA_integer_ else ix[1]
           }
           col_est <- pick_col("^(estimate|coef|value)$|^estimate$|^coef$|^coeff")
-          col_se  <- pick_col("(std\\.? ?error|se)")
-          col_t   <- pick_col("^(t.?value|z|t)$")
-          col_p   <- pick_col("^(pr\\(|p.?value|p$)")
+          col_se <- pick_col("(std\\.? ?error|se)")
+          col_t <- pick_col("^(t.?value|z|t)$")
+          col_p <- pick_col("^(pr\\(|p.?value|p$)")
           
           # flexible row pickers
           pick_row <- function(patterns, exclude=NULL) {
@@ -408,11 +413,11 @@ if (isTRUE(RUN_ESTIMATION)) {
             if (!is.null(exclude)) ok <- ok[!vapply(rn[ok], function(z) any(grepl(exclude, z, ignore.case = TRUE)), logical(1))]
             if (length(ok) == 0) NA_integer_ else ok[1]
           }
-          r_gamma     <- pick_row("^gamma$")
-          r_lambda    <- pick_row("^lambda|^lam$")
-          r_delta1    <- pick_row("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
+          r_gamma <- pick_row("^gamma$")
+          r_lambda <- pick_row("^lambda|^lam$")
+          r_delta1 <- pick_row("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
           r_deltaMain <- pick_row("^delta$", exclude="1")  # avoid delta_1
-          r_nu        <- pick_row("^nu$")
+          r_nu <- pick_row("^nu$")
           
           get_val <- function(ri, ci) {
             if (is.na(ri) || is.na(ci)) return(NA_real_)
@@ -421,32 +426,32 @@ if (isTRUE(RUN_ESTIMATION)) {
           }
           
           # estimates
-          est$gamma     <- get_val(r_gamma,     col_est)
-          est$lambda    <- get_val(r_lambda,    col_est)
-          est$delta_KL  <- get_val(r_delta1,    col_est)
+          est$gamma <- get_val(r_gamma, col_est)
+          est$lambda <- get_val(r_lambda, col_est)
+          est$delta_KL <- get_val(r_delta1, col_est)
           est$delta_VAE <- get_val(r_deltaMain, col_est)
-          est$nu        <- get_val(r_nu,        col_est)
+          est$nu <- get_val(r_nu, col_est)
           
-          # SE
-          se$gamma     <- get_val(r_gamma,     col_se)
-          se$lambda    <- get_val(r_lambda,    col_se)
-          se$delta_KL  <- get_val(r_delta1,    col_se)
+          # Standard errors
+          se$gamma <- get_val(r_gamma, col_se)
+          se$lambda <- get_val(r_lambda, col_se)
+          se$delta_KL <- get_val(r_delta1, col_se)
           se$delta_VAE <- get_val(r_deltaMain, col_se)
-          se$nu        <- get_val(r_nu,        col_se)
+          se$nu <- get_val(r_nu, col_se)
           
-          # t
-          tval$gamma     <- get_val(r_gamma,     col_t)
-          tval$lambda    <- get_val(r_lambda,    col_t)
-          tval$delta_KL  <- get_val(r_delta1,    col_t)
+          # t-tests
+          tval$gamma <- get_val(r_gamma, col_t)
+          tval$lambda <- get_val(r_lambda, col_t)
+          tval$delta_KL <- get_val(r_delta1, col_t)
           tval$delta_VAE <- get_val(r_deltaMain, col_t)
-          tval$nu        <- get_val(r_nu,        col_t)
+          tval$nu <- get_val(r_nu, col_t)
           
-          # p
-          pval$gamma     <- get_val(r_gamma,     col_p)
-          pval$lambda    <- get_val(r_lambda,    col_p)
-          pval$delta_KL  <- get_val(r_delta1,    col_p)
+          # p-values
+          pval$gamma <- get_val(r_gamma, col_p)
+          pval$lambda <- get_val(r_lambda, col_p)
+          pval$delta_KL <- get_val(r_delta1, col_p)
           pval$delta_VAE <- get_val(r_deltaMain, col_p)
-          pval$nu        <- get_val(r_nu,        col_p)
+          pval$nu <- get_val(r_nu, col_p)
         }
         
         # Fallback from vcov if needed (compute t, p)
@@ -464,11 +469,11 @@ if (isTRUE(RUN_ESTIMATION)) {
                     if (is.finite(v) && v > 0) v else NA_real_
                   }
                 }
-                if (!is.finite(se$gamma))     se$gamma     <- get_se("^gamma$")
-                if (!is.finite(se$lambda))    se$lambda    <- get_se("^lambda|^lam$")
-                if (!is.finite(se$delta_KL))  se$delta_KL  <- get_se("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
+                if (!is.finite(se$gamma)) se$gamma <- get_se("^gamma$")
+                if (!is.finite(se$lambda)) se$lambda <- get_se("^lambda|^lam$")
+                if (!is.finite(se$delta_KL)) se$delta_KL <- get_se("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
                 if (!is.finite(se$delta_VAE)) se$delta_VAE <- get_se("^delta$")
-                if (!is.finite(se$nu))        se$nu        <- get_se("^nu$")
+                if (!is.finite(se$nu)) se$nu <- get_se("^nu$")
               }
             }
           }
@@ -477,12 +482,12 @@ if (isTRUE(RUN_ESTIMATION)) {
         # t from est/SE when missing
         for (nm in names(est)) {
           if (!is.finite(tval[[nm]]) && is.finite(est[[nm]]) && is.finite(se[[nm]]) && se[[nm]] > 0)
-            tval[[nm]] <- est[[nm]] / se[[nm]]
+            tval[[nm]] <- est[[nm]]/se[[nm]]
         }
         # p from t (normal)
         for (nm in names(tval)) {
           if (!is.finite(pval[[nm]]) && is.finite(tval[[nm]]))
-            pval[[nm]] <- 2 * (1 - pnorm(abs(tval[[nm]])))
+            pval[[nm]] <- 2*(1 - pnorm(abs(tval[[nm]])))
         }
         
         # residual diagnostics in log space
@@ -494,7 +499,7 @@ if (isTRUE(RUN_ESTIMATION)) {
           R2_val <- 1 - sum(resid_log^2) / sum((obs_log - mean(obs_log))^2)
           k_hat <- length(tryCatch(stats::coef(fit_obj), error = function(e) numeric(0)))
           n_obs <- length(obs_log)
-          adjR2_val <- if (n_obs - k_hat - 1 > 0) 1 - (1 - R2_val) * (n_obs - 1) / (n_obs - k_hat - 1) else NA_real_
+          adjR2_val <- if (n_obs - k_hat - 1 > 0) 1 - (1 - R2_val)*(n_obs - 1)/(n_obs - k_hat - 1) else NA_real_
           ic0 <- aic_bic_from_rss(resid_log, k = k_hat, add_k_rho = 0L)
           icR <- aic_bic_from_rss(resid_log, k = k_hat, add_k_rho = rho_penalty)
           AIC0  <- ic0$AIC;  AICc0 <- ic0$AICc
@@ -507,22 +512,50 @@ if (isTRUE(RUN_ESTIMATION)) {
         # Attach to all rows in the grid combo
         full_grid <- full_grid %>%
           mutate(
-            gamma = est$gamma, lambda = est$lambda, delta_KL = est$delta_KL, delta_VAE = est$delta_VAE, nu = est$nu,
-            se_gamma = se$gamma, se_lambda = se$lambda, se_delta_KL = se$delta_KL, se_delta_VAE = se$delta_VAE, se_nu = se$nu,
-            t_gamma = tval$gamma, t_lambda = tval$lambda, t_delta_KL = tval$delta_KL, t_delta_VAE = tval$delta_VAE, t_nu = tval$nu,
-            p_gamma = pval$gamma, p_lambda = pval$lambda, p_delta_KL = pval$delta_KL, p_delta_VAE = pval$delta_VAE, p_nu = pval$nu,
-            ci_lo_gamma     = ifelse(is.finite(gamma)     & is.finite(se_gamma),     gamma - 1.96*se_gamma,     NA_real_),
-            ci_hi_gamma     = ifelse(is.finite(gamma)     & is.finite(se_gamma),     gamma + 1.96*se_gamma,     NA_real_),
-            ci_lo_lambda    = ifelse(is.finite(lambda)    & is.finite(se_lambda),    lambda - 1.96*se_lambda,    NA_real_),
-            ci_hi_lambda    = ifelse(is.finite(lambda)    & is.finite(se_lambda),    lambda + 1.96*se_lambda,    NA_real_),
-            ci_lo_delta_KL  = ifelse(is.finite(delta_KL)  & is.finite(se_delta_KL),  delta_KL - 1.96*se_delta_KL,  NA_real_),
-            ci_hi_delta_KL  = ifelse(is.finite(delta_KL)  & is.finite(se_delta_KL),  delta_KL + 1.96*se_delta_KL,  NA_real_),
+            # Estimated values
+            gamma = est$gamma, 
+            lambda = est$lambda, 
+            delta_KL = est$delta_KL, 
+            delta_VAE = est$delta_VAE, 
+            nu = est$nu,
+            # Standard errors
+            se_gamma = se$gamma, 
+            se_lambda = se$lambda, 
+            se_delta_KL = se$delta_KL, 
+            se_delta_VAE = se$delta_VAE, 
+            se_nu = se$nu,
+            # t-tests
+            t_gamma = tval$gamma, 
+            t_lambda = tval$lambda, 
+            t_delta_KL = tval$delta_KL, 
+            t_delta_VAE = tval$delta_VAE, 
+            t_nu = tval$nu,
+            # P-values
+            p_gamma = pval$gamma, 
+            p_lambda = pval$lambda, 
+            p_delta_KL = pval$delta_KL,
+            p_delta_VAE = pval$delta_VAE, 
+            p_nu = pval$nu,
+            # Confidence intervals
+            ci_lo_gamma = ifelse(is.finite(gamma) & is.finite(se_gamma), gamma - 1.96*se_gamma, NA_real_),
+            ci_hi_gamma = ifelse(is.finite(gamma) & is.finite(se_gamma), gamma + 1.96*se_gamma, NA_real_),
+            ci_lo_lambda = ifelse(is.finite(lambda) & is.finite(se_lambda), lambda - 1.96*se_lambda, NA_real_),
+            ci_hi_lambda = ifelse(is.finite(lambda) & is.finite(se_lambda), lambda + 1.96*se_lambda, NA_real_),
+            ci_lo_delta_KL = ifelse(is.finite(delta_KL) & is.finite(se_delta_KL), delta_KL - 1.96*se_delta_KL, NA_real_),
+            ci_hi_delta_KL = ifelse(is.finite(delta_KL) & is.finite(se_delta_KL), delta_KL + 1.96*se_delta_KL, NA_real_),
             ci_lo_delta_VAE = ifelse(is.finite(delta_VAE) & is.finite(se_delta_VAE), delta_VAE - 1.96*se_delta_VAE, NA_real_),
             ci_hi_delta_VAE = ifelse(is.finite(delta_VAE) & is.finite(se_delta_VAE), delta_VAE + 1.96*se_delta_VAE, NA_real_),
-            ci_lo_nu        = ifelse(is.finite(nu)        & is.finite(se_nu),        nu - 1.96*se_nu,        NA_real_),
-            ci_hi_nu        = ifelse(is.finite(nu)        & is.finite(se_nu),        nu + 1.96*se_nu,        NA_real_),
-            R2 = R2_val, adjR2 = adjR2_val,
-            AIC_naive = AIC0, AICc_naive = AICc0, AIC_plusRho = AICR, AICc_plusRho = AICcR,
+            ci_lo_nu = ifelse(is.finite(nu) & is.finite(se_nu), nu - 1.96*se_nu, NA_real_),
+            ci_hi_nu = ifelse(is.finite(nu) & is.finite(se_nu), nu + 1.96*se_nu, NA_real_),
+            # Goodness of fit
+            R2 = R2_val, 
+            adjR2 = adjR2_val,
+            # Information criteria
+            AIC_naive = AIC0, 
+            AICc_naive = AICc0, 
+            AIC_plusRho = AICR, 
+            AICc_plusRho = AICcR,
+            # Number of iterations
             iter = iter_val
           )
       }
@@ -531,7 +564,7 @@ if (isTRUE(RUN_ESTIMATION)) {
     }
     
     
-    # Final validity flags
+    # Final validity flags. These determine if a run is "valid", allowing it to be a candidate for best method run
     grid_tbl %>%
       mutate(
         across(c(
@@ -548,14 +581,14 @@ if (isTRUE(RUN_ESTIMATION)) {
       ) %>%
       rowwise() %>%
       mutate(
-        valid = isTRUE(conv) &&
-          !is.na(delta_KL)  && delta_KL  > 0.1 && delta_KL  < 0.9 &&
-          !is.na(delta_VAE) && delta_VAE > 0.1 && delta_VAE < 0.9 &&
-          !is.na(sigma_KL)  && sigma_KL  > 0.1 && sigma_KL  < 5   &&
-          !is.na(sigma_VAE) && sigma_VAE > 0.1 && sigma_VAE < 5   &&
-          !is.na(gamma)     && gamma     > 0.5 && gamma     < 5   &&
-          !is.na(nu)        && nu        > 0.5 && nu        < 5   &&
-          !is.na(lambda)    && lambda    > -0.4 && lambda   < 0.4
+        valid = isTRUE(conv) && # only runs that converged
+          !is.na(delta_KL)  && delta_KL  > 0.1 && delta_KL  < 0.9 && # deltas in the range
+          !is.na(delta_VAE) && delta_VAE > 0.1 && delta_VAE < 0.9 && # deltas in the range
+          !is.na(sigma_KL)  && sigma_KL  > 0.1 && sigma_KL  < 5   && # sigmas in the range
+          !is.na(sigma_VAE) && sigma_VAE > 0.1 && sigma_VAE < 5   && # sigmas in the range
+          !is.na(gamma)     && gamma     > 0.5 && gamma     < 5   && # gamma in the range
+          !is.na(nu)        && nu        > 0.5 && nu        < 5   && # nu in the range
+          !is.na(lambda)    && lambda    > -0.4 && lambda   < 0.4 # lambda in the range
       ) %>%
       ungroup()
   }
@@ -578,10 +611,10 @@ fits_all <- future_map2(
     }
   ),
   .progress = TRUE,
-  .options  = furrr_options(
+  .options = furrr_options(
     packages = c("micEconCES","dplyr","tidyr","purrr","readr"),
-    globals  = c("rhoGrid_KL","rhoGrid_VAE","estimate_region","extract_region"),
-    seed     = TRUE
+    globals = c("rhoGrid_KL","rhoGrid_VAE","estimate_region","extract_region"),
+    seed = TRUE
   )
 )
 
@@ -604,7 +637,6 @@ convergence_summary <- results_grid %>%
   distinct() %>%
   count(method, conv, name = "count") %>%
   mutate(status = ifelse(conv, "Converged", "Failed"))
-
 
 # Best method per region
 # Strict criteria
@@ -666,7 +698,7 @@ aic_weights <- results_grid %>%
   group_by(r) %>%
   mutate(
     dAICc = AICc_plusRho - min(AICc_plusRho, na.rm = TRUE),
-    wAICc = exp(-0.5 * dAICc) / sum(exp(-0.5 * dAICc), na.rm = TRUE)
+    wAICc = exp(-0.5*dAICc)/sum(exp(-0.5*dAICc), na.rm = TRUE)
   ) %>%
   ungroup()
 
@@ -676,7 +708,7 @@ grid_conv_share <- results_grid %>%
   summarise(
     grid_points = n(),
     n_converged = sum(conv, na.rm = TRUE),
-    share_converged = n_converged / grid_points,
+    share_converged = n_converged/grid_points,
     .groups = "drop"
   )
 
@@ -689,26 +721,26 @@ iam_table <- best_methods %>%
     year = t,
     region = r,
     total_factor_productivity = gamma * exp(lambda * t),
-    share_capital_valueadded  = delta_KL,
-    share_valueadded_output   = delta_VAE,
-    elasticity_substitution_KL  = sigma_KL,
+    share_capital_valueadded = delta_KL,
+    share_valueadded_output = delta_VAE,
+    elasticity_substitution_KL = sigma_KL,
     elasticity_substitution_VAE = sigma_VAE,
-    exponent_rho_KL  = rho_KL,
+    exponent_rho_KL = rho_KL,
     exponent_rho_VAE = rho_VAE,
-    gamma_parameter   = gamma,
-    nu_parameter      = nu,
-    lambda_parameter  = lambda,
+    gamma_parameter = gamma,
+    nu_parameter = nu,
+    lambda_parameter = lambda,
     p_gamma, p_lambda, p_delta_KL, p_delta_VAE, p_nu
   )
 
 
 
 # ---- EXPORT derived artifacts ----
-write_csv(convergence_summary,   "CES_convergence_summary.csv")
-write_csv(best_methods,          "CES_best_methods.csv")
-write_csv(results_grid_valid,            "CES_results_grid_valid.csv")
-write_csv(results_grid_invalid,          "CES_results_grid_invalid.csv")
-write_csv(robustness_summary,    "CES_robustness_summary.csv")
-write_csv(aic_weights,           "CES_AICc_weights.csv")
-write_csv(grid_conv_share,       "CES_grid_convergence_share.csv")
-write_csv(iam_table,             "IAM_params.csv")
+write_csv(convergence_summary, "CES_convergence_summary.csv")
+write_csv(best_methods, "CES_best_methods.csv")
+write_csv(results_grid_valid, "CES_results_grid_valid.csv")
+write_csv(results_grid_invalid, "CES_results_grid_invalid.csv")
+write_csv(robustness_summary, "CES_robustness_summary.csv")
+write_csv(aic_weights, "CES_AICc_weights.csv")
+write_csv(grid_conv_share, "CES_grid_convergence_share.csv")
+write_csv(iam_table, "IAM_params.csv")
