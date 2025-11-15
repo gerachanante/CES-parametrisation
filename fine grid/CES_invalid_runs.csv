@@ -1,1 +1,0 @@
-r,method,rss,R2,adjR2,iter,conv,message,gamma,p_gamma,lambda,p_lambda,delta_KL,p_delta_KL,delta_VAE,p_delta_VAE,nu,p_nu,rho_KL,rho_VAE,sigma_KL,sigma_VAE,AIC_naive,BIC_naive,AICc_naive,AIC_plusRho,BIC_plusRho,AICc_plusRho,runtime,on_edge_KL,on_edge_VAE,n_sig_struct,valid,dAICc,wAICc

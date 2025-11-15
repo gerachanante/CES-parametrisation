@@ -18,27 +18,37 @@ options(future.rng.onMisuse = "ignore")
 options(future.wait.timeout = 0)   # disables waiting timeout
 
 
-setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation/finest grid")
+setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation/stage1")
 infile <- "MERGE macro.csv"
 
 # TRUE to run a fresh estimation or FALSE to reuse saved results (.rds file)
-RUN_ESTIMATION <- FALSE
+RUN_ESTIMATION <- TRUE
 
-# Full grid
-rhoGrid_KL  <- c(seq(-0.8, -0.5, by = 0.01),
-                 seq(-0.495, 0.5, by = 0.005),
-                 seq(0.51, 2, by = 0.01),
-                 seq(2.05, 5, by = 0.05),
-                 seq(5.1, 7, by = 0.1),
-                 8, 9, 10, 15, 20, 50, 100)
-rhoGrid_VAE <- c(seq(-0.8, 0, by = 0.01),
-                 seq(0.05, 6, by = 0.05),
-                 seq(6.2, 8, by = 0.2),
-                 9, 10, 15, 20, 50, 100)
+# Stage 1 grid (broad scope)
+rhoGrid_KL  <- c(seq(-0.8, -0.2, by = 0.2),
+                 seq(-0.1, 0.5, by = 0.1),
+                 seq(0.7, 2, by = 0.3),
+                 3, 5, 10, 20, 50)
+rhoGrid_VAE <- c(seq(-0.8, -0.2, by = 0.2),
+                 seq(-0.1, 0.5, by = 0.1),
+                 seq(0.7, 3, by = 0.3),
+                 4, 6, 10, 20)
+
+# Stage 2 grid (refined)
+# rhoGrid_KL  <- c(seq(-0.8, -0.5, by = 0.01),
+#                  seq(-0.495, 0.5, by = 0.005),
+#                  seq(0.51, 2, by = 0.01),
+#                  seq(2.05, 5, by = 0.05),
+#                  seq(5.1, 7, by = 0.1),
+#                  8, 9, 10, 15, 20, 50, 100)
+# rhoGrid_VAE <- c(seq(-0.8, 0, by = 0.01),
+#                  seq(0.05, 6, by = 0.05),
+#                  seq(6.2, 8, by = 0.2),
+#                  9, 10, 15, 20, 50, 100)
 
 # Test grid
-#rhoGrid_KL <- c(seq(-0.9, 1, by = 0.15), seq(1.5, 5, by = 0.5), 10, 50, 100)
-#rhoGrid_VAE <- c(seq(-0.9, 1, by = 0.15), seq(1.5, 5, by = 0.5), 10, 50, 100)
+# rhoGrid_KL <- c(seq(-0.5, 1, by = 0.25))
+# rhoGrid_VAE <- c(seq(-0.5, 1, by = 0.25))
 
 # Helper functions
 # Log scale modification of information criteria: AIC, BIC, AICc from residual sums of squares
@@ -151,6 +161,184 @@ iter_safe <- function(fit_obj) {
   it
 }
 
+# Helper: grid-point stats extractor
+extract_grid_coeffs <- function(fit_sub) {
+  # fit_sub is a single cesEst object from allRhoFull
+  
+  if (!inherits(fit_sub, "cesEst")) return(NULL)
+  
+  cm <- coef_table_safe(fit_sub)
+  if (is.null(cm) || !is.matrix(cm) || nrow(cm) == 0L) return(NULL)
+  
+  rn <- rownames(cm)
+  cn <- colnames(cm)
+  
+  # flexible column pickers
+  pick_col <- function(patterns) {
+    ix <- which(vapply(
+      cn,
+      function(z) any(grepl(patterns, z, ignore.case = TRUE)),
+      logical(1)
+    ))
+    if (length(ix) == 0) NA_integer_ else ix[1]
+  }
+  col_est <- pick_col("^(estimate|coef|value)$|^estimate$|^coef$|^coeff")
+  col_se  <- pick_col("(std\\.? ?error|se)")
+  col_t   <- pick_col("^(t.?value|z|t)$")
+  col_p   <- pick_col("^(pr\\(|p.?value|p$)")
+  
+  # flexible row pickers for parameter names
+  pick_row <- function(patterns, exclude = NULL) {
+    ok <- which(vapply(
+      rn,
+      function(z) any(grepl(patterns, z, ignore.case = TRUE)),
+      logical(1)
+    ))
+    if (!is.null(exclude) && length(ok) > 0L) {
+      ok <- ok[!vapply(
+        rn[ok],
+        function(z) any(grepl(exclude, z, ignore.case = TRUE)),
+        logical(1)
+      )]
+    }
+    if (length(ok) == 0L) NA_integer_ else ok[1]
+  }
+  r_gamma     <- pick_row("^gamma$")
+  r_lambda    <- pick_row("^lambda|^lam$")
+  r_delta1    <- pick_row("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
+  r_deltaMain <- pick_row("^delta$", exclude = "1")
+  r_nu        <- pick_row("^nu$")
+  
+  get_val <- function(ri, ci) {
+    if (is.na(ri) || is.na(ci)) return(NA_real_)
+    v <- suppressWarnings(as.numeric(cm[ri, ci, drop = TRUE]))
+    if (is.finite(v)) v else NA_real_
+  }
+  
+  est <- list(
+    gamma     = get_val(r_gamma,     col_est),
+    lambda    = get_val(r_lambda,    col_est),
+    delta_KVA = get_val(r_delta1,    col_est),
+    delta_VAY = get_val(r_deltaMain, col_est),
+    nu        = get_val(r_nu,        col_est)
+  )
+  
+  se  <- list(
+    gamma     = get_val(r_gamma,     col_se),
+    lambda    = get_val(r_lambda,    col_se),
+    delta_KVA = get_val(r_delta1,    col_se),
+    delta_VAY = get_val(r_deltaMain, col_se),
+    nu        = get_val(r_nu,        col_se)
+  )
+  
+  tval <- list(
+    gamma     = get_val(r_gamma,     col_t),
+    lambda    = get_val(r_lambda,    col_t),
+    delta_KVA = get_val(r_delta1,    col_t),
+    delta_VAY = get_val(r_deltaMain, col_t),
+    nu        = get_val(r_nu,        col_t)
+  )
+  pval <- list(
+    gamma     = get_val(r_gamma,     col_p),
+    lambda    = get_val(r_lambda,    col_p),
+    delta_KVA = get_val(r_delta1,    col_p),
+    delta_VAY = get_val(r_deltaMain, col_p),
+    nu        = get_val(r_nu,        col_p)
+  )
+  
+  # fallback SEs from vcov if SEs are missing
+  if (any(!is.finite(unlist(se)))) {
+    vc <- try(vcov(fit_sub), silent = TRUE)
+    if (!inherits(vc, "try-error") && is.matrix(vc)) {
+      se_v <- try(sqrt(diag(vc)), silent = TRUE)
+      if (!inherits(se_v, "try-error")) {
+        nms <- names(se_v); if (is.null(nms)) nms <- rownames(vc)
+        if (length(nms)) {
+          get_se <- function(pattern) {
+            ix <- which(grepl(pattern, nms, ignore.case = TRUE))
+            if (length(ix) == 0) NA_real_ else {
+              v <- unname(se_v[ix[1]])
+              if (is.finite(v) && v > 0) v else NA_real_
+            }
+          }
+          if (!is.finite(se$gamma))     se$gamma     <- get_se("^gamma$")
+          if (!is.finite(se$lambda))    se$lambda    <- get_se("^lambda|^lam$")
+          if (!is.finite(se$delta_KVA)) se$delta_KVA <- get_se("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
+          if (!is.finite(se$delta_VAY)) se$delta_VAY <- get_se("^delta$")
+          if (!is.finite(se$nu))        se$nu        <- get_se("^nu$")
+        }
+      }
+    }
+  }
+  
+  # fill in t if missing
+  for (nm in names(est)) {
+    if (!is.finite(tval[[nm]]) &&
+        is.finite(est[[nm]]) &&
+        is.finite(se[[nm]]) && se[[nm]] > 0) {
+      tval[[nm]] <- est[[nm]] / se[[nm]]
+    }
+  }
+  # fill in p if missing (normal approx)
+  for (nm in names(tval)) {
+    if (!is.finite(pval[[nm]]) && is.finite(tval[[nm]])) {
+      pval[[nm]] <- 2 * (1 - pnorm(abs(tval[[nm]])))
+    }
+  }
+  
+  # rhos for joining
+  cf <- try(stats::coef(fit_sub), silent = TRUE)
+  rho_KL  <- NA_real_
+  rho_VAE <- NA_real_
+  if (!inherits(cf, "try-error") && length(cf) > 0L) {
+    nms <- names(cf)
+    if (any(grepl("^rho[_]?1$", nms))) {
+      rho_KL <- as.numeric(cf[grep("^rho[_]?1$", nms)[1]])
+    }
+    if ("rho" %in% nms) {
+      rho_VAE <- as.numeric(cf[["rho"]])
+    } else if (any(grepl("^rho2$", nms))) {
+      rho_VAE <- as.numeric(cf[grep("^rho2$", nms)[1]])
+    }
+  }
+  
+  tibble(
+    rho_KL  = rho_KL,
+    rho_VAE = rho_VAE,
+    gamma     = est$gamma,
+    lambda    = est$lambda,
+    delta_KVA = est$delta_KVA,
+    delta_VAY = est$delta_VAY,
+    nu        = est$nu,
+    se_gamma     = se$gamma,
+    se_lambda    = se$lambda,
+    se_delta_KVA = se$delta_KVA,
+    se_delta_VAY = se$delta_VAY,
+    se_nu        = se$nu,
+    t_gamma      = tval$gamma,
+    t_lambda     = tval$lambda,
+    t_delta_KVA  = tval$delta_KVA,
+    t_delta_VAY  = tval$delta_VAY,
+    t_nu         = tval$nu,
+    p_gamma      = pval$gamma,
+    p_lambda     = pval$lambda,
+    p_delta_KVA  = pval$delta_KVA,
+    p_delta_VAY  = pval$delta_VAY,
+    p_nu         = pval$nu,
+    ci_lo_gamma     = ifelse(is.finite(est$gamma)     & is.finite(se$gamma),     est$gamma     - 1.96 * se$gamma,     NA_real_),
+    ci_hi_gamma     = ifelse(is.finite(est$gamma)     & is.finite(se$gamma),     est$gamma     + 1.96 * se$gamma,     NA_real_),
+    ci_lo_lambda    = ifelse(is.finite(est$lambda)    & is.finite(se$lambda),    est$lambda    - 1.96 * se$lambda,    NA_real_),
+    ci_hi_lambda    = ifelse(is.finite(est$lambda)    & is.finite(se$lambda),    est$lambda    + 1.96 * se$lambda,    NA_real_),
+    ci_lo_delta_KVA = ifelse(is.finite(est$delta_KVA) & is.finite(se$delta_KVA), est$delta_KVA - 1.96 * se$delta_KVA, NA_real_),
+    ci_hi_delta_KVA = ifelse(is.finite(est$delta_KVA) & is.finite(se$delta_KVA), est$delta_KVA + 1.96 * se$delta_KVA, NA_real_),
+    ci_lo_delta_VAY = ifelse(is.finite(est$delta_VAY) & is.finite(se$delta_VAY), est$delta_VAY - 1.96 * se$delta_VAY, NA_real_),
+    ci_hi_delta_VAY = ifelse(is.finite(est$delta_VAY) & is.finite(se$delta_VAY), est$delta_VAY + 1.96 * se$delta_VAY, NA_real_),
+    ci_lo_nu        = ifelse(is.finite(est$nu)        & is.finite(se$nu),        est$nu        - 1.96 * se$nu,        NA_real_),
+    ci_hi_nu        = ifelse(is.finite(est$nu)        & is.finite(se$nu),        est$nu        + 1.96 * se$nu,        NA_real_)
+  )
+}
+
+
 
 
 # ---- ESTIMATION ----
@@ -188,11 +376,15 @@ if (isTRUE(RUN_ESTIMATION)) {
   estimate_region <- function(d, region_name) {
     message("\nEstimating region: ", region_name)
     d_num <- d %>% transmute(t, Ys, Ks, Ls, Es)
+    # Setting a deterministic seed for replicability
+    seed_val <- sum(utf8ToInt(region_name))
+    seed_val <- abs(seed_val) %% .Machine$integer.max
+    set.seed(seed_val)
     # Fast methods: NM, Nelder-Mead, Newton, L-BFGS-B
     # Slow methods: LM, PORT, BFGS
     # Terribly slow: SANN, DE, CG
-    opt_methods <- unique(c("Newton", "L-BFGS-B", "BFGS"))
-    #opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
+    # opt_methods <- unique(c("Newton", "L-BFGS-B", "BFGS"))
+    opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
     
     fit_all <- setNames(vector("list", length(opt_methods)), opt_methods)
     conv_all <- setNames(rep(FALSE, length(opt_methods)), opt_methods)
@@ -301,25 +493,60 @@ if (isTRUE(RUN_ESTIMATION)) {
   # ---- EXTRACT RESULTS ----
   # This function builds a parameter grid from the rhos tested, attaches coefficient estimates, flags run validity and produces a table per region/method/grid point
   extract_region <- function(region_name, region_fits) {
+    # empty tibble helper 
     if (is.null(region_fits) || is.null(region_fits$data) || length(region_fits$fits) == 0L) {
       return(tibble(
-        r = character(), method = character(), rho_KL = numeric(), rho_VAE = numeric(),
-        conv = logical(), msg = character(), rss = numeric(),
-        gamma = numeric(), lambda = numeric(), delta_KVA = numeric(), delta_VAY = numeric(), nu = numeric(),
-        se_gamma = numeric(), se_lambda = numeric(), se_delta_KVA = numeric(), se_delta_VAY = numeric(), se_nu = numeric(),
-        t_gamma = numeric(), t_lambda = numeric(), t_delta_KVA = numeric(), t_delta_VAY = numeric(), t_nu = numeric(),
-        p_gamma = numeric(), p_lambda = numeric(), p_delta_KVA = numeric(), p_delta_VAY = numeric(), p_nu = numeric(),
-        ci_lo_gamma = numeric(), ci_hi_gamma = numeric(),
-        ci_lo_lambda = numeric(), ci_hi_lambda = numeric(),
-        ci_lo_delta_KVA = numeric(), ci_hi_delta_KVA = numeric(),
-        ci_lo_delta_VAY = numeric(), ci_hi_delta_VAY = numeric(),
-        ci_lo_nu = numeric(), ci_hi_nu = numeric(),
-        R2 = numeric(), adjR2 = numeric(),
-        AIC_naive = numeric(), AICc_naive = numeric(), AIC_plusRho = numeric(), AICc_plusRho = numeric(),
+        r = character(), 
+        method = character(), 
+        rho_KL = numeric(), 
+        rho_VAE = numeric(),
+        conv = logical(), 
+        msg = character(), 
+        rss = numeric(),
+        gamma = numeric(), 
+        lambda = numeric(), 
+        delta_KVA = numeric(), 
+        delta_VAY = numeric(), 
+        nu = numeric(),
+        se_gamma = numeric(), 
+        se_lambda = numeric(), 
+        se_delta_KVA = numeric(), 
+        se_delta_VAY = numeric(), 
+        se_nu = numeric(),
+        t_gamma = numeric(), 
+        t_lambda = numeric(), 
+        t_delta_KVA = numeric(), 
+        t_delta_VAY = numeric(), 
+        t_nu = numeric(),
+        p_gamma = numeric(), 
+        p_lambda = numeric(), 
+        p_delta_KVA = numeric(), 
+        p_delta_VAY = numeric(), 
+        p_nu = numeric(),
+        ci_lo_gamma = numeric(), 
+        ci_hi_gamma = numeric(),
+        ci_lo_lambda = numeric(), 
+        ci_hi_lambda = numeric(),
+        ci_lo_delta_KVA = numeric(), 
+        ci_hi_delta_KVA = numeric(),
+        ci_lo_delta_VAY = numeric(), 
+        ci_hi_delta_VAY = numeric(),
+        ci_lo_nu = numeric(), 
+        ci_hi_nu = numeric(),
+        R2 = numeric(), 
+        adjR2 = numeric(),
+        AIC_naive = numeric(), 
+        AICc_naive = numeric(), 
+        AIC_plusRho = numeric(), 
+        AICc_plusRho = numeric(),
         iter = numeric(),
-        sigma_KL = numeric(), sigma_VAE = numeric(),
-        on_edge_KL = logical(), on_edge_VAE = logical(),
-        n_grid = integer(), runtime_total = numeric(), runtime_per_grid = numeric(),
+        sigma_KL = numeric(), 
+        sigma_VAE = numeric(),
+        on_edge_KL = logical(), 
+        on_edge_VAE = logical(),
+        n_grid = integer(), 
+        runtime_total = numeric(), 
+        runtime_per_grid = numeric(),
         valid = logical()
       ))
     }
@@ -328,31 +555,39 @@ if (isTRUE(RUN_ESTIMATION)) {
     grid_tbl <- tibble()
     
     for (m in names(region_fits$fits)) {
-      fit_obj <- region_fits$fits[[m]]
+      fit_obj   <- region_fits$fits[[m]]
       conv_flag <- safe_bool(region_fits$conv[[m]], FALSE)
-      msg_flag <- safe_chr(region_fits$msg[[m]], NA_character_)
-      runtime <- safe_num(region_fits$times[[m]], NA_real_)
-
-      # Build the full grid
+      msg_flag  <- safe_chr(region_fits$msg[[m]], NA_character_)
+      runtime   <- safe_num(region_fits$times[[m]], NA_real_)
+      
+      # base grid for this region × method
       full_grid <- expand_grid(rho_KL = rhoGrid_KL, rho_VAE = rhoGrid_VAE) %>%
         mutate(
           r = region_name,
           method = m,
-          conv = conv_flag,
-          msg = msg_flag,
-          n_grid = nrow(expand_grid(rho_KL = rhoGrid_KL, rho_VAE = rhoGrid_VAE)),
+          n_grid = n(),
           runtime_total = runtime,
           runtime_per_grid = runtime / n_grid,
-          sigma_KL = ifelse(is.finite(1/(1+rho_KL)), 1/(1+rho_KL), NA_real_),
-          sigma_VAE = ifelse(is.finite(1/(1+rho_VAE)),  1/(1+rho_VAE),  NA_real_),
-          on_edge_KL = on_grid_edge(rho_KL, rhoGrid_KL),
-          on_edge_VAE = on_grid_edge(rho_VAE,  rhoGrid_VAE),
-          
-          rss = NA_real_,
-          gamma = NA_real_, lambda = NA_real_, delta_KVA = NA_real_, delta_VAY = NA_real_, nu = NA_real_,
-          se_gamma = NA_real_, se_lambda = NA_real_, se_delta_KVA = NA_real_, se_delta_VAY = NA_real_, se_nu = NA_real_,
-          t_gamma = NA_real_, t_lambda = NA_real_, t_delta_KVA = NA_real_, t_delta_VAY = NA_real_, t_nu = NA_real_,
-          p_gamma = NA_real_, p_lambda = NA_real_, p_delta_KVA = NA_real_, p_delta_VAY = NA_real_, p_nu = NA_real_,
+          msg   = msg_flag,
+          conv  = conv_flag,  # will be overridden by grid-level convergence if available
+          sigma_KL  = ifelse(is.finite(1/(1+rho_KL)), 1/(1+rho_KL), NA_real_),
+          sigma_VAE = ifelse(is.finite(1/(1+rho_VAE)), 1/(1+rho_VAE), NA_real_),
+          on_edge_KL  = on_grid_edge(rho_KL,  rhoGrid_KL),
+          on_edge_VAE = on_grid_edge(rho_VAE, rhoGrid_VAE),
+          rss = NA_real_
+        )
+      
+      # pre-fill parameter/stat columns as NA
+      full_grid <- full_grid %>%
+        mutate(
+          gamma = NA_real_, lambda = NA_real_,
+          delta_KVA = NA_real_, delta_VAY = NA_real_, nu = NA_real_,
+          se_gamma = NA_real_, se_lambda = NA_real_,
+          se_delta_KVA = NA_real_, se_delta_VAY = NA_real_, se_nu = NA_real_,
+          t_gamma = NA_real_, t_lambda = NA_real_,
+          t_delta_KVA = NA_real_, t_delta_VAY = NA_real_, t_nu = NA_real_,
+          p_gamma = NA_real_, p_lambda = NA_real_,
+          p_delta_KVA = NA_real_, p_delta_VAY = NA_real_, p_nu = NA_real_,
           ci_lo_gamma = NA_real_, ci_hi_gamma = NA_real_,
           ci_lo_lambda = NA_real_, ci_hi_lambda = NA_real_,
           ci_lo_delta_KVA = NA_real_, ci_hi_delta_KVA = NA_real_,
@@ -364,230 +599,139 @@ if (isTRUE(RUN_ESTIMATION)) {
           iter = NA_real_
         )
       
-      # If the fit succeeded, merge results
       if (inherits(fit_obj, "cesEst")) {
-        # RSS per grid combination
-        if (!is.null(fit_obj$allRhoSum) && nrow(fit_obj$allRhoSum) > 0) {
-          allRho_tbl <- fit_obj$allRhoSum %>%
-            select(rho1, rho, rss) %>%
-            rename(rho_KL = rho1, rho_VAE = rho) %>%
-            suppressWarnings(drop_na(rss))
-          if (nrow(allRho_tbl) > 0) {
-            full_grid <- full_grid %>%
-              left_join(allRho_tbl, by = c("rho_KL","rho_VAE"), suffix = c("", ".fit")) %>%
-              mutate(rss = coalesce(rss.fit, rss)) %>%
-              select(-rss.fit)
-          }
+        # --- 1. RSS and convergence per grid from allRhoSum ---
+        if (!is.null(fit_obj$allRhoSum) && nrow(fit_obj$allRhoSum) > 0L) {
+          sum_tbl <- fit_obj$allRhoSum
+          # assume columns rho1 & rho & convergence exist for nested case
+          sum_tbl <- sum_tbl %>%
+            mutate(
+              rho1 = as.numeric(.data[["rho1"]]),
+              rho  = as.numeric(.data[["rho"]]),
+              rss  = as.numeric(.data[["rss"]]),
+              conv_grid = safe_bool(.data[["convergence"]], TRUE)
+            ) %>%
+            select(rho1, rho, rss, conv_grid) %>%
+            rename(rho_KL = rho1, rho_VAE = rho)
+          
+          full_grid <- full_grid %>%
+            left_join(sum_tbl, by = c("rho_KL", "rho_VAE"), suffix = c("", ".sum")) %>%
+            mutate(
+              rss  = coalesce(rss.sum, rss),
+              conv = ifelse(is.na(conv_grid), conv, conv_grid)
+            ) %>%
+            select(-rss.sum, -conv_grid)
         }
         
-        # Coefficients, SE,t,p,R2,AIC,iter attached to grid combinations from each method.
-        cm <- NULL
-        s1 <- try(summary(fit_obj), silent = TRUE)
-        s2 <- try(summary(fit_obj, ela = TRUE), silent = TRUE)
-        
-        # grab the first available coef-like table
-        for (s in list(s1, s2)) {
-          if (inherits(s, "try-error") || is.null(s)) next
-          for (slot in c("coefficients", "coef", "coefTable")) {
-            if (!is.null(s[[slot]])) {
-              tmp <- try(as.data.frame(s[[slot]]), silent = TRUE)
-              if (!inherits(tmp, "try-error") && nrow(tmp) > 0) { cm <- tmp; break }
-            }
-          }
-          if (!is.null(cm)) break
-        }
-        # sometimes summary returns a matrix directly
-        if (is.null(cm) && !inherits(s1, "try-error") && is.matrix(s1)) cm <- as.data.frame(s1)
-        if (is.null(cm) && !inherits(s2, "try-error") && is.matrix(s2)) cm <- as.data.frame(s2)
-        
-        est <- se <- tval <- pval <- list(gamma=NA_real_, lambda=NA_real_, delta_KVA=NA_real_, delta_VAY=NA_real_, nu=NA_real_)
-        
-        if (!is.null(cm) && nrow(cm) > 0) {
-          rn <- rownames(cm); cn <- colnames(cm)
+        # --- 2. Per-grid coefficients from allRhoFull ---
+        coef_df <- NULL
+        if (!is.null(fit_obj$allRhoFull) && length(fit_obj$allRhoFull) > 0L) {
+          coef_df <- purrr::map_dfr(fit_obj$allRhoFull, extract_grid_coeffs)
           
-          # flexible column pickers (case-insensitive)
-          pick_col <- function(patterns) {
-            ix <- which(vapply(cn, function(z) any(grepl(patterns, z, ignore.case = TRUE)), logical(1)))
-            if (length(ix) == 0) NA_integer_ else ix[1]
-          }
-          col_est <- pick_col("^(estimate|coef|value)$|^estimate$|^coef$|^coeff")
-          col_se <- pick_col("(std\\.? ?error|se)")
-          col_t <- pick_col("^(t.?value|z|t)$")
-          col_p <- pick_col("^(pr\\(|p.?value|p$)")
-          
-          # flexible row pickers
-          pick_row <- function(patterns, exclude=NULL) {
-            ok <- which(vapply(rn, function(z) any(grepl(patterns, z, ignore.case = TRUE)), logical(1)))
-            if (!is.null(exclude)) ok <- ok[!vapply(rn[ok], function(z) any(grepl(exclude, z, ignore.case = TRUE)), logical(1))]
-            if (length(ok) == 0) NA_integer_ else ok[1]
-          }
-          r_gamma <- pick_row("^gamma$")
-          r_lambda <- pick_row("^lambda|^lam$")
-          r_delta1 <- pick_row("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
-          r_deltaMain <- pick_row("^delta$", exclude="1")  # avoid delta_1
-          r_nu <- pick_row("^nu$")
-          
-          get_val <- function(ri, ci) {
-            if (is.na(ri) || is.na(ci)) return(NA_real_)
-            v <- suppressWarnings(as.numeric(cm[ri, ci, drop=TRUE]))
-            if (is.finite(v)) v else NA_real_
-          }
-          
-          # estimates
-          est$gamma <- get_val(r_gamma, col_est)
-          est$lambda <- get_val(r_lambda, col_est)
-          est$delta_KVA <- get_val(r_delta1, col_est)
-          est$delta_VAY <- get_val(r_deltaMain, col_est)
-          est$nu <- get_val(r_nu, col_est)
-          
-          # Standard errors
-          se$gamma <- get_val(r_gamma, col_se)
-          se$lambda <- get_val(r_lambda, col_se)
-          se$delta_KVA <- get_val(r_delta1, col_se)
-          se$delta_VAY <- get_val(r_deltaMain, col_se)
-          se$nu <- get_val(r_nu, col_se)
-          
-          # t-tests
-          tval$gamma <- get_val(r_gamma, col_t)
-          tval$lambda <- get_val(r_lambda, col_t)
-          tval$delta_KVA <- get_val(r_delta1, col_t)
-          tval$delta_VAY <- get_val(r_deltaMain, col_t)
-          tval$nu <- get_val(r_nu, col_t)
-          
-          # p-values
-          pval$gamma <- get_val(r_gamma, col_p)
-          pval$lambda <- get_val(r_lambda, col_p)
-          pval$delta_KVA <- get_val(r_delta1, col_p)
-          pval$delta_VAY <- get_val(r_deltaMain, col_p)
-          pval$nu <- get_val(r_nu, col_p)
+          full_grid <- full_grid %>%
+            left_join(coef_df, by = c("rho_KL","rho_VAE"), suffix = c("", ".sub")) %>%
+            mutate(
+              gamma     = coalesce(gamma.sub,     gamma),
+              lambda    = coalesce(lambda.sub,    lambda),
+              delta_KVA = coalesce(delta_KVA.sub, delta_KVA),
+              delta_VAY = coalesce(delta_VAY.sub, delta_VAY),
+              nu        = coalesce(nu.sub,        nu),
+              se_gamma     = coalesce(se_gamma.sub,     se_gamma),
+              se_lambda    = coalesce(se_lambda.sub,    se_lambda),
+              se_delta_KVA = coalesce(se_delta_KVA.sub, se_delta_KVA),
+              se_delta_VAY = coalesce(se_delta_VAY.sub, se_delta_VAY),
+              se_nu        = coalesce(se_nu.sub,        se_nu),
+              t_gamma      = coalesce(t_gamma.sub,      t_gamma),
+              t_lambda     = coalesce(t_lambda.sub,     t_lambda),
+              t_delta_KVA  = coalesce(t_delta_KVA.sub,  t_delta_KVA),
+              t_delta_VAY  = coalesce(t_delta_VAY.sub,  t_delta_VAY),
+              t_nu         = coalesce(t_nu.sub,         t_nu),
+              p_gamma      = coalesce(p_gamma.sub,      p_gamma),
+              p_lambda     = coalesce(p_lambda.sub,     p_lambda),
+              p_delta_KVA  = coalesce(p_delta_KVA.sub,  p_delta_KVA),
+              p_delta_VAY  = coalesce(p_delta_VAY.sub,  p_delta_VAY),
+              p_nu         = coalesce(p_nu.sub,         p_nu),
+              ci_lo_gamma     = coalesce(ci_lo_gamma.sub,     ci_lo_gamma),
+              ci_hi_gamma     = coalesce(ci_hi_gamma.sub,     ci_hi_gamma),
+              ci_lo_lambda    = coalesce(ci_lo_lambda.sub,    ci_lo_lambda),
+              ci_hi_lambda    = coalesce(ci_hi_lambda.sub,    ci_hi_lambda),
+              ci_lo_delta_KVA = coalesce(ci_lo_delta_KVA.sub, ci_lo_delta_KVA),
+              ci_hi_delta_KVA = coalesce(ci_hi_delta_KVA.sub, ci_hi_delta_KVA),
+              ci_lo_delta_VAY = coalesce(ci_lo_delta_VAY.sub, ci_lo_delta_VAY),
+              ci_hi_delta_VAY = coalesce(ci_hi_delta_VAY.sub, ci_hi_delta_VAY),
+              ci_lo_nu        = coalesce(ci_lo_nu.sub,        ci_lo_nu),
+              ci_hi_nu        = coalesce(ci_hi_nu.sub,        ci_hi_nu)
+            ) %>%
+            select(-ends_with(".sub"))
         }
         
-        # Fallback from vcov if needed (compute t, p)
-        if (any(!is.finite(unlist(se)))) {
-          vc <- try(vcov(fit_obj), silent = TRUE)
-          if (!inherits(vc, "try-error") && is.matrix(vc)) {
-            se_v <- try(sqrt(diag(vc)), silent = TRUE)
-            if (!inherits(se_v, "try-error")) {
-              nms <- names(se_v); if (is.null(nms)) nms <- rownames(vc)
-              if (length(nms)) {
-                get_se <- function(pattern) {
-                  ix <- which(grepl(pattern, nms, ignore.case = TRUE))
-                  if (length(ix) == 0) NA_real_ else {
-                    v <- unname(se_v[ix[1]])
-                    if (is.finite(v) && v > 0) v else NA_real_
-                  }
-                }
-                if (!is.finite(se$gamma)) se$gamma <- get_se("^gamma$")
-                if (!is.finite(se$lambda)) se$lambda <- get_se("^lambda|^lam$")
-                if (!is.finite(se$delta_KVA)) se$delta_KVA <- get_se("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
-                if (!is.finite(se$delta_VAY)) se$delta_VAY <- get_se("^delta$")
-                if (!is.finite(se$nu)) se$nu <- get_se("^nu$")
-              }
-            }
-          }
+        # --- 3. R² and AIC per grid cell (using rss) ---
+        obs_log <- try(log(d_num$Ys + 1e-12), silent = TRUE)
+        if (!inherits(obs_log, "try-error")) {
+          n_obs   <- length(obs_log)
+          TSS_log <- sum((obs_log - mean(obs_log))^2)
+          k_hat   <- length(tryCatch(stats::coef(fit_obj), error = function(e) numeric(0)))
+          k0      <- k_hat + rho_penalty
+          
+          full_grid <- full_grid %>%
+            mutate(
+              R2 = ifelse(is.finite(rss) & TSS_log > 0,
+                          1 - rss / TSS_log,
+                          NA_real_),
+              adjR2 = ifelse(
+                is.finite(R2) & (n_obs - k_hat - 1) > 0,
+                1 - (1 - R2) * (n_obs - 1) / (n_obs - k_hat - 1),
+                NA_real_
+              ),
+              AIC_naive = ifelse(
+                is.finite(rss),
+                n_obs * log(rss / n_obs) + 2 * k_hat,
+                NA_real_
+              ),
+              AICc_naive = ifelse(
+                is.finite(AIC_naive) & (n_obs - k_hat - 1) > 0,
+                AIC_naive + (2 * k_hat * (k_hat + 1)) / (n_obs - k_hat - 1),
+                NA_real_
+              ),
+              AIC_plusRho = ifelse(
+                is.finite(rss),
+                n_obs * log(rss / n_obs) + 2 * k0,
+                NA_real_
+              ),
+              AICc_plusRho = ifelse(
+                is.finite(AIC_plusRho) & (n_obs - k0 - 1) > 0,
+                AIC_plusRho + (2 * k0 * (k0 + 1)) / (n_obs - k0 - 1),
+                NA_real_
+              )
+            )
         }
         
-        # t from est/SE when missing
-        for (nm in names(est)) {
-          if (!is.finite(tval[[nm]]) && is.finite(est[[nm]]) && is.finite(se[[nm]]) && se[[nm]] > 0)
-            tval[[nm]] <- est[[nm]]/se[[nm]]
-        }
-        # p from t (normal)
-        for (nm in names(tval)) {
-          if (!is.finite(pval[[nm]]) && is.finite(tval[[nm]]))
-            pval[[nm]] <- 2*(1 - pnorm(abs(tval[[nm]])))
-        }
-        
-        # residual diagnostics in log space
-        obs_log  <- try(log(d_num$Ys + 1e-12), silent = TRUE)
-        fit_logv <- try(log(as.numeric(fit_obj$fitted.values) + 1e-12), silent = TRUE)
-        R2_val <- adjR2_val <- AIC0 <- AICc0 <- AICR <- AICcR <- NA_real_
-        if (!inherits(obs_log,"try-error") && !inherits(fit_logv,"try-error") && length(obs_log) == length(fit_logv)) {
-          resid_log <- obs_log - fit_logv
-          R2_val <- 1 - sum(resid_log^2) / sum((obs_log - mean(obs_log))^2)
-          k_hat <- length(tryCatch(stats::coef(fit_obj), error = function(e) numeric(0)))
-          n_obs <- length(obs_log)
-          adjR2_val <- if (n_obs - k_hat - 1 > 0) 1 - (1 - R2_val)*(n_obs - 1)/(n_obs - k_hat - 1) else NA_real_
-          ic0 <- aic_bic_from_rss(resid_log, k = k_hat, add_k_rho = 0L)
-          icR <- aic_bic_from_rss(resid_log, k = k_hat, add_k_rho = rho_penalty)
-          AIC0  <- ic0$AIC;  AICc0 <- ic0$AICc
-          AICR  <- icR$AIC;  AICcR <- icR$AICc
-        }
-        
-        # Iterations
-        iter_val <- iter_safe(fit_obj)
-        
-        # Attach to all rows in the grid combo
-        full_grid <- full_grid %>%
-          mutate(
-            # Estimated values
-            gamma = est$gamma, 
-            lambda = est$lambda, 
-            delta_KVA = est$delta_KVA, 
-            delta_VAY = est$delta_VAY, 
-            nu = est$nu,
-            # Standard errors
-            se_gamma = se$gamma, 
-            se_lambda = se$lambda, 
-            se_delta_KVA = se$delta_KVA, 
-            se_delta_VAY = se$delta_VAY, 
-            se_nu = se$nu,
-            # t-tests
-            t_gamma = tval$gamma, 
-            t_lambda = tval$lambda, 
-            t_delta_KVA = tval$delta_KVA, 
-            t_delta_VAY = tval$delta_VAY, 
-            t_nu = tval$nu,
-            # P-values
-            p_gamma = pval$gamma, 
-            p_lambda = pval$lambda, 
-            p_delta_KVA = pval$delta_KVA,
-            p_delta_VAY = pval$delta_VAY, 
-            p_nu = pval$nu,
-            # Confidence intervals
-            ci_lo_gamma = ifelse(is.finite(gamma) & is.finite(se_gamma), gamma - 1.96*se_gamma, NA_real_),
-            ci_hi_gamma = ifelse(is.finite(gamma) & is.finite(se_gamma), gamma + 1.96*se_gamma, NA_real_),
-            ci_lo_lambda = ifelse(is.finite(lambda) & is.finite(se_lambda), lambda - 1.96*se_lambda, NA_real_),
-            ci_hi_lambda = ifelse(is.finite(lambda) & is.finite(se_lambda), lambda + 1.96*se_lambda, NA_real_),
-            ci_lo_delta_KVA = ifelse(is.finite(delta_KVA) & is.finite(se_delta_KVA), delta_KVA - 1.96*se_delta_KVA, NA_real_),
-            ci_hi_delta_KVA = ifelse(is.finite(delta_KVA) & is.finite(se_delta_KVA), delta_KVA + 1.96*se_delta_KVA, NA_real_),
-            ci_lo_delta_VAY = ifelse(is.finite(delta_VAY) & is.finite(se_delta_VAY), delta_VAY - 1.96*se_delta_VAY, NA_real_),
-            ci_hi_delta_VAY = ifelse(is.finite(delta_VAY) & is.finite(se_delta_VAY), delta_VAY + 1.96*se_delta_VAY, NA_real_),
-            ci_lo_nu = ifelse(is.finite(nu) & is.finite(se_nu), nu - 1.96*se_nu, NA_real_),
-            ci_hi_nu = ifelse(is.finite(nu) & is.finite(se_nu), nu + 1.96*se_nu, NA_real_),
-            # Goodness of fit
-            R2 = R2_val, 
-            adjR2 = adjR2_val,
-            # Information criteria
-            AIC_naive = AIC0, 
-            AICc_naive = AICc0, 
-            AIC_plusRho = AICR, 
-            AICc_plusRho = AICcR,
-            # Number of iterations
-            iter = iter_val
-          )
+        # --- 4. iterations (method-level) ---
+        full_grid$iter <- iter_safe(fit_obj)
       }
       
       grid_tbl <- bind_rows(grid_tbl, full_grid)
     }
     
-    
-    # Final validity flags. These determine if a run is "valid", allowing it to be a candidate for best method run
+    # cast numerics
     grid_tbl %>%
       mutate(
         across(c(
-          delta_KVA, delta_VAE, gamma, nu, lambda, sigma_KL, sigma_VAE,
-          se_gamma, se_lambda, se_delta_KVA, se_delta_VAE, se_nu,
-          t_gamma, t_lambda, t_delta_KVA, t_delta_VAE, t_nu,
-          p_gamma, p_lambda, p_delta_KVA, p_delta_VAE, p_nu,
+          delta_KVA, delta_VAY, gamma, nu, lambda, sigma_KL, sigma_VAE,
+          se_gamma, se_lambda, se_delta_KVA, se_delta_VAY, se_nu,
+          t_gamma, t_lambda, t_delta_KVA, t_delta_VAY, t_nu,
+          p_gamma, p_lambda, p_delta_KVA, p_delta_VAY, p_nu,
           ci_lo_gamma, ci_hi_gamma, ci_lo_lambda, ci_hi_lambda,
-          ci_lo_delta_KVA, ci_hi_delta_KVA, ci_lo_delta_VAE, ci_hi_delta_VAE,
+          ci_lo_delta_KVA, ci_hi_delta_KVA, ci_lo_delta_VAY, ci_hi_delta_VAY,
           ci_lo_nu, ci_hi_nu,
           rss, R2, adjR2, AIC_naive, AICc_naive, AIC_plusRho, AICc_plusRho,
           iter, rho_KL, rho_VAE, runtime_total, runtime_per_grid, n_grid
         ), ~ suppressWarnings(as.numeric(.)))
-      ) 
+      )
   }
+  
+  
+  
   
   
 # Region splits
@@ -662,19 +806,35 @@ convergence_summary <- results_grid %>%
 add_validity <- function(df) {
   df %>%
     mutate(
-      across(any_of(c("delta_KVA","delta_VAE","gamma","nu","lambda")),
+      across(any_of(c("delta_KVA","delta_VAY","gamma","nu","lambda")),
              ~ suppressWarnings(as.numeric(.))),
-      valid =
+      valid_raw =
         (conv %in% TRUE) &
-        is.finite(delta_KVA) & delta_KVA >= 0 & delta_KVA <= 1 &
-        is.finite(delta_VAE) & delta_VAE >= 0 & delta_VAE <= 1 &
-        is.finite(gamma) & gamma > 0.2 & gamma < 5 &
-        is.finite(nu) & nu > 0.2 & nu < 5 &
-        is.finite(lambda)
-    )
+        between(delta_KVA, 0, 1) &
+        between(delta_VAY, 0, 1) &
+        between(gamma, 0.5, 3) &
+        between(nu, 0.7, 1.3) &
+        between(lambda, -0.05, 0.05),
+      valid = if_else(is.na(valid_raw), FALSE, valid_raw, FALSE)
+    ) %>%
+    select(-valid_raw)
 }
 
+
 results_grid <- results_grid %>% select(-any_of("valid")) %>% add_validity()
+
+# Warning messages
+message("Finite gamma:      ", sum(is.finite(results_grid$gamma)))
+message("Finite delta_KVA:  ", sum(is.finite(results_grid$delta_KVA)))
+message("Finite delta_VAY:  ", sum(is.finite(results_grid$delta_VAY)))
+message("Valid grid points: ", sum(results_grid$valid))
+
+if (all(is.na(results_grid$gamma))) {
+  warning("All gamma are NA – something is still wrong with coefficient extraction.")
+}
+if (sum(results_grid$valid) == 0) {
+  warning("No grid point passed validity – consider relaxing thresholds.")
+}
 
 
 # Valid runs table
@@ -690,7 +850,7 @@ best_methods <- results_grid %>%
   filter(valid,
          is.finite(R2), R2 > 0.7,
          is.finite(delta_KVA) & delta_KVA >= 0.2 & delta_KVA <= 0.8 &
-         is.finite(delta_VAE) & delta_VAE >= 0.2 & delta_VAE <= 0.8 &
+         is.finite(delta_VAY) & delta_VAY >= 0.2 & delta_VAY <= 0.8 &
          rho_KL < 50 & rho_VAE < 50
          ) %>%
   group_by(r) %>%
@@ -727,7 +887,7 @@ if (length(still_missing) > 0) {
     mutate(
       near_valid = (
         between(delta_KVA, 0.02, 0.98) &
-          between(delta_VAE, 0.02, 0.98) &
+          between(delta_VAY, 0.02, 0.98) &
           between(gamma, 0.1, 100) &
           between(nu, 0.3, 10) &
           between(lambda, -0.5, 0.5)
@@ -764,7 +924,7 @@ results_grid_valid_summary <- results_grid %>%
     gamma_med     = median(gamma, na.rm = TRUE),
     lambda_med    = median(lambda, na.rm = TRUE),
     delta_KVA_med  = median(delta_KVA, na.rm = TRUE),
-    delta_VAE_med = median(delta_VAE, na.rm = TRUE),
+    delta_VAY_med = median(delta_VAY, na.rm = TRUE),
     nu_med        = median(nu, na.rm = TRUE),
     sigma_KL_med  = median(sigma_KL, na.rm = TRUE),
     sigma_VAE_med = median(sigma_VAE, na.rm = TRUE),
@@ -779,35 +939,43 @@ results_grid_valid_summary <- results_grid %>%
 
 # Robustness summary by region
 robustness_summary <- results_grid %>%
-  filter(valid) %>%
   group_by(r) %>%
   summarise(
     n_grid_total = n(),
-    n_valid = n(),
-    share_valid = 1,
-    gamma_min = min(gamma, na.rm = TRUE),  gamma_max = max(gamma, na.rm = TRUE),
-    deltaKL_min = min(delta_KVA, na.rm = TRUE), deltaKL_max = max(delta_KVA, na.rm = TRUE),
-    deltaVAE_min = min(delta_VAE, na.rm = TRUE), deltaVAE_max = max(delta_VAE, na.rm = TRUE),
-    nu_min = min(nu, na.rm = TRUE), nu_max = max(nu, na.rm = TRUE),
-    sigmaKL_min = min(sigma_KL, na.rm = TRUE), sigmaKL_max = max(sigma_KL, na.rm = TRUE),
-    sigmaVAE_min = min(sigma_VAE, na.rm = TRUE), sigmaVAE_max = max(sigma_VAE, na.rm = TRUE),
+    n_valid = sum(valid, na.rm = TRUE),
+    share_valid = n_valid / n_grid_total,
+    gamma_min = if (any(valid & is.finite(gamma))) min(gamma[valid], na.rm = TRUE) else NA_real_,
+    gamma_max = if (any(valid & is.finite(gamma))) max(gamma[valid], na.rm = TRUE) else NA_real_,
+    deltaKL_min = if (any(valid & is.finite(delta_KVA))) min(delta_KVA[valid], na.rm = TRUE) else NA_real_,
+    deltaKL_max = if (any(valid & is.finite(delta_KVA))) max(delta_KVA[valid], na.rm = TRUE) else NA_real_,
+    deltaVAE_min = if (any(valid & is.finite(delta_VAY))) min(delta_VAY[valid], na.rm = TRUE) else NA_real_,
+    deltaVAE_max = if (any(valid & is.finite(delta_VAY))) max(delta_VAY[valid], na.rm = TRUE) else NA_real_,
+    nu_min = if (any(valid & is.finite(nu))) min(nu[valid], na.rm = TRUE) else NA_real_,
+    nu_max = if (any(valid & is.finite(nu))) max(nu[valid], na.rm = TRUE) else NA_real_,
+    sigmaKL_min = if (any(valid & is.finite(sigma_KL))) min(sigma_KL[valid], na.rm = TRUE) else NA_real_,
+    sigmaKL_max = if (any(valid & is.finite(sigma_KL))) max(sigma_KL[valid], na.rm = TRUE) else NA_real_,
+    sigmaVAE_min = if (any(valid & is.finite(sigma_VAE))) min(sigma_VAE[valid], na.rm = TRUE) else NA_real_,
+    sigmaVAE_max = if (any(valid & is.finite(sigma_VAE))) max(sigma_VAE[valid], na.rm = TRUE) else NA_real_,
     .groups = "drop"
   ) %>%
   left_join(
-    best_methods %>% select(r, method, best_tier, gamma, delta_KVA, delta_VAE, nu, sigma_KL, sigma_VAE),
+    best_methods %>%
+      select(r, method, best_tier, gamma, delta_KVA, delta_VAY, nu, sigma_KL, sigma_VAE),
     by = "r"
   )
 
 
+
 # AICc weights (among valid only)
 aic_weights <- results_grid %>%
-  filter(valid) %>%
+  filter(valid, is.finite(AICc_plusRho)) %>%
   group_by(r) %>%
   mutate(
     dAICc = AICc_plusRho - min(AICc_plusRho, na.rm = TRUE),
-    wAICc = exp(-0.5*dAICc)/sum(exp(-0.5*dAICc), na.rm = TRUE)
+    wAICc = exp(-0.5 * dAICc) / sum(exp(-0.5 * dAICc), na.rm = TRUE)
   ) %>%
   ungroup()
+
 
 # Share of grid converged
 grid_conv_share <- results_grid %>%
@@ -834,9 +1002,9 @@ iam_table <- best_methods %>%
     elasticity_substitution_VAE = sigma_VAE,
     exponent_rho_KL = rho_KL,
     exponent_rho_VAE = rho_VAE,
-    gamma_parameter = gamma,
-    nu_parameter = nu,
-    lambda_parameter = lambda,
+    TFP_scale_factor = gamma,
+    returns_scale = nu,
+    TFP_growth_rate = lambda,
     p_gamma, p_lambda, p_delta_KVA, p_delta_VAY, p_nu
   )
 

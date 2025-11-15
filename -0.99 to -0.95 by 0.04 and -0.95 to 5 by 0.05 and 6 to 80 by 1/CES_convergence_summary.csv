@@ -1,9 +1,0 @@
-method,conv,count,status
-L-BFGS-B,TRUE,31,Converged
-LM,FALSE,8,Failed
-LM,TRUE,23,Converged
-NM,TRUE,31,Converged
-Nelder-Mead,TRUE,31,Converged
-Newton,TRUE,31,Converged
-PORT,FALSE,16,Failed
-PORT,TRUE,15,Converged
