@@ -22,10 +22,10 @@ setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updat
 infile <- "MERGE macro.csv"
 
 # TRUE to run a fresh estimation or FALSE to reuse saved results (.rds file)
-RUN_ESTIMATION <- TRUE
+RUN_ESTIMATION <- FALSE
 
 # Stage 1 grid (broad scope)
-rhoGrid_KL  <- c(seq(-0.8, -0.2, by = 0.2),
+rhoGrid_KL  <- c(seq(-0.9, -0.15, by = 0.15),
                  seq(-0.1, 0.5, by = 0.1),
                  seq(0.7, 2, by = 0.3),
                  3, 5, 10, 20, 50)
@@ -410,25 +410,25 @@ if (isTRUE(RUN_ESTIMATION)) {
         start_arg <- c(gamma = 1, lambda = 0.001, delta_KVA = 0.5, delta_VAY = 0.5, nu = 1)
         lower_arg <- c(gamma = 0.1, lambda = -0.3, delta_KVA = 0.1, delta_VAY = 0.1, nu = 0.3)
         upper_arg <- c(gamma = 10, lambda = 0.3, delta_KVA = 0.9, delta_VAY = 0.9, nu = 5)
-        control_arg <- list(maxit = 1000, factr = 1e9)
+        control_arg <- list(maxit = 10000, factr = 1e9)
       }
-      if (m == "PORT") control_arg <- list(eval.max=1e5, iter.max=2e4, reltol=1e-8)
+      if (m == "PORT") control_arg <- list(eval.max=1e5, iter.max=1e5, reltol=1e-8)
       if (m == "BFGS") {
         start_arg <- c(gamma = 1, lambda = 0.001, delta_KVA = 0.5, delta_VAY = 0.5, nu = 1)
         lower_arg <- c(delta_KVA = 0.1, delta_VAY = 0.1)
         upper_arg <- c(delta_KVA = 0.9, delta_VAY = 0.9)
-        control_arg <- list(maxit = 1000, reltol = 1e-8)
+        control_arg <- list(maxit = 10000, reltol = 1e-8)
       }
       if (m == "CG") {
         start_arg <- c(gamma = 1, lambda = 0.001, delta_KVA = 0.5, delta_VAY = 0.5, nu = 1)
         lower_arg <- c(delta_KVA = 0.1, delta_VAY = 0.1)
         upper_arg <- c(delta_KVA = 0.9, delta_VAY = 0.9)
-        control_arg <- list(maxit = 500, reltol = 1e-8)
+        control_arg <- list(maxit = 1000, reltol = 1e-8)
       }    
       if (m %in% c("NM","Nelder-Mead")) {
         lower_arg <- c(delta_KVA = 0.1, delta_VAY = 0.1)
         upper_arg <- c(delta_KVA = 0.9, delta_VAY = 0.9)
-        control_arg <- list(maxit = 5000, reltol = 1e-8)
+        control_arg <- list(maxit = 10000, reltol = 1e-8)
       }
       if (m == "LM") {
         lower_arg <- c(delta_KVA = 0.1, delta_VAY = 0.1)
@@ -438,12 +438,12 @@ if (isTRUE(RUN_ESTIMATION)) {
       if (m == "SANN") {
         lower_arg <- c(delta_KVA = 0.1, delta_VAY = 0.1)
         upper_arg <- c(delta_KVA = 0.9, delta_VAY = 0.9)
-        control_arg <- list(maxit = 5000, temp = 10, tmax = 50)
+        control_arg <- list(maxit = 10000, temp = 10, tmax = 50)
       }
       if (m == "DE") {
         lower_arg <- c(gamma = 0.1, lambda = -0.3, delta_KVA = 0.1, delta_VAY = 0.1, nu = 0.3)
         upper_arg <- c(gamma = 10, lambda = 0.3, delta_KVA = 0.9, delta_VAY = 0.9, nu = 5)
-        control_arg <- list(itermax = 100)
+        control_arg <- list(itermax = 500)
       }
       
       args_list <- list(
@@ -803,23 +803,59 @@ convergence_summary <- results_grid %>%
   mutate(status = ifelse(conv, "Converged", "Failed"))
 
 # Adding validity to the runs, economically feasible and converged from the solver
+# Adding validity to the runs, with detailed status diagnostics
 add_validity <- function(df) {
   df %>%
     mutate(
-      across(any_of(c("delta_KVA","delta_VAY","gamma","nu","lambda")),
-             ~ suppressWarnings(as.numeric(.))),
-      valid_raw =
-        (conv %in% TRUE) &
-        between(delta_KVA, 0, 1) &
-        between(delta_VAY, 0, 1) &
-        between(gamma, 0.5, 3) &
-        between(nu, 0.7, 1.3) &
-        between(lambda, -0.05, 0.05),
-      valid = if_else(is.na(valid_raw), FALSE, valid_raw, FALSE)
-    ) %>%
-    select(-valid_raw)
+      across(
+        any_of(c("delta_KVA","delta_VAY","gamma","nu","lambda")),
+        ~ suppressWarnings(as.numeric(.))
+      ),
+      
+      valid_reason = pmap_chr(
+        list(conv, rss, R2, delta_KVA, delta_VAY, gamma, nu, lambda),
+        function(conv, rss, R2, dK, dV, g, n, lam) {
+          reasons <- c()
+          
+          if (!isTRUE(conv))                     reasons <- c(reasons, "Solver did not converge")
+          if (!is.finite(rss) || rss <= 0)       reasons <- c(reasons, "RSS invalid")
+          if (!is.finite(R2)  || R2 <= 0 || R2 > 1) reasons <- c(reasons, "R2 invalid")
+          if (!is.finite(dK)  || dK < 0 || dK > 1) reasons <- c(reasons, "dK-VA out of [0,1]")
+          if (!is.finite(dV)  || dV < 0 || dV > 1) reasons <- c(reasons, "dVA-Y out of [0,1]")
+          if (!is.finite(g)   || g < 0.5 || g > 3) reasons <- c(reasons, "gamma out of [0.5,3]")
+          if (!is.finite(n)   || n < 0.7 || n > 1.3) reasons <- c(reasons, "v out of [0.7,1.3]")
+          if (!is.finite(lam) || lam < -0.05 || lam > 0.05) reasons <- c(reasons, "lambda out of [-0.05,0.05]")
+          
+          if (length(reasons) == 0) "OK" else paste(reasons, collapse = "; ")
+        }
+      ),
+      
+      valid = valid_reason == "OK",
+      
+      solver_reason = msg_group_map(msg),
+      
+      status = case_when(
+        valid                 ~ "Valid",
+        !conv                 ~ solver_reason,
+        valid_reason != "OK"  ~ valid_reason,
+        TRUE                  ~ "Unspecified"
+      ),
+      
+      status = factor(
+        status,
+        levels = c(
+          "False convergence","Max iterations","Reduction criterion",
+          "Bounds/tolerance","Unspecified",
+          "RSS invalid","R2 invalid",
+          "dK-VA out of [0,1]","dVA-Y out of [0,1]",
+          "gamma out of [0.5,3]","v out of [0.7,1.3]","lambda out of [-0.05,0.05]",
+          "Valid"
+        )
+      )
+    )
 }
 
+  
 
 results_grid <- results_grid %>% select(-any_of("valid")) %>% add_validity()
 
@@ -1013,9 +1049,10 @@ iam_table <- best_methods %>%
 # ---- EXPORT derived artifacts ----
 #write_csv(convergence_summary, "CES_convergence_summary.csv")
 write_csv(best_methods, "CES_best_methods.csv")
+write_csv(results_grid, "CES_results_grid.csv")
 #write_csv(results_grid_valid, "CES_results_grid_valid.csv")
 #write_csv(results_grid_invalid, "CES_results_grid_invalid.csv")
-#write_csv(robustness_summary, "CES_robustness_summary.csv")
+write_csv(robustness_summary, "CES_robustness_summary.csv")
 #write_csv(aic_weights, "CES_AICc_weights.csv")
-#write_csv(grid_conv_share, "CES_grid_convergence_share.csv")
+write_csv(grid_conv_share, "CES_grid_convergence_share.csv")
 write_csv(iam_table, "IAM_params.csv")
