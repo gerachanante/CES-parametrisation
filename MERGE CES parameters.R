@@ -25,26 +25,27 @@ infile <- "MERGE macro.csv"
 RUN_ESTIMATION <- FALSE
 
 # Stage 1 grid (broad scope)
-rhoGrid_KL  <- c(seq(-0.9, -0.15, by = 0.15),
-                 seq(-0.1, 0.5, by = 0.1),
-                 seq(0.7, 2, by = 0.3),
-                 3, 5, 10, 20, 50)
-rhoGrid_VAE <- c(seq(-0.8, -0.2, by = 0.2),
-                 seq(-0.1, 0.5, by = 0.1),
-                 seq(0.7, 3, by = 0.3),
-                 4, 6, 10, 20)
+# rhoGrid_KL  <- c(seq(-0.9, -0.15, by = 0.15),
+#                  seq(-0.1, 0.5, by = 0.1),
+#                  seq(0.7, 2, by = 0.3),
+#                  3, 5, 10, 20, 50)
+# rhoGrid_VAE <- c(seq(-0.8, -0.2, by = 0.2),
+#                  seq(-0.1, 0.5, by = 0.1),
+#                  seq(0.7, 3, by = 0.3),
+#                  4, 6, 10, 20)
 
 # Stage 2 grid (refined)
-# rhoGrid_KL  <- c(seq(-0.8, -0.5, by = 0.01),
-#                  seq(-0.495, 0.5, by = 0.005),
-#                  seq(0.51, 2, by = 0.01),
-#                  seq(2.05, 5, by = 0.05),
-#                  seq(5.1, 7, by = 0.1),
-#                  8, 9, 10, 15, 20, 50, 100)
-# rhoGrid_VAE <- c(seq(-0.8, 0, by = 0.01),
-#                  seq(0.05, 6, by = 0.05),
-#                  seq(6.2, 8, by = 0.2),
-#                  9, 10, 15, 20, 50, 100)
+rhoGrid_KL  <- c(seq(-0.8, -0.4, by = 0.02),
+                 seq(-0.39, 0.8, by = 0.01),
+                 seq(0.82, 2.5, by = 0.02),
+                 seq(2.55, 4, by = 0.05),
+                 seq(4.5, 8, by = 0.5),
+                 8, 9, 10, 15, 20, 50, 100)
+                 8, 9, 10, 15, 20, 50, 100)
+rhoGrid_VAE <- c(seq(-0.8, 0, by = 0.01),
+                 seq(0.05, 6, by = 0.05),
+                 seq(6.2, 8, by = 0.2),
+                 seq(6, 10, by = 1)
 
 # Test grid
 # rhoGrid_KL <- c(seq(-0.5, 1, by = 0.25))
@@ -383,8 +384,8 @@ if (isTRUE(RUN_ESTIMATION)) {
     # Fast methods: NM, Nelder-Mead, Newton, L-BFGS-B
     # Slow methods: LM, PORT, BFGS
     # Terribly slow: SANN, DE, CG
-    # opt_methods <- unique(c("Newton", "L-BFGS-B", "BFGS"))
-    opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
+    opt_methods <- unique(c("Newton", "L-BFGS-B", "BFGS", "DE"))
+    # opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
     
     fit_all <- setNames(vector("list", length(opt_methods)), opt_methods)
     conv_all <- setNames(rep(FALSE, length(opt_methods)), opt_methods)
