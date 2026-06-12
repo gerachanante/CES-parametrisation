@@ -12,13 +12,15 @@ library(purrr)
 library(furrr)
 library(parallel)
 library(tibble)
+library(stringr)
 
 #### SETTINGS ####
 options(future.rng.onMisuse = "ignore") # suppresses warnings
 options(future.wait.timeout = 0)   # disables waiting timeout for parallel workers
 
 
-setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/CES-parametrisation/stage2")
+# setwd("C:/Users/escami_g/OneDrive - Paul Scherrer Institut/05.Models/MERGE updates/Macroeconomic submodel/CES-parametrisation/stage1")
+setwd("C:/Users/escami_g/Desktop/CES data/stage1")
 infile <- "MERGE macro.csv"
 
 # TRUE to run a fresh estimation or FALSE to reuse saved results (.rds and CSV files from previous estimation)
@@ -26,29 +28,35 @@ RUN_ESTIMATION <- TRUE
 
 # Stage 1 grid (broad scope)
 # Each sequence (seq) defines a range of rho values; together they comprise the full search grid for each rho
-# rhoGrid_KL  <- c(seq(-0.9, -0.15, by = 0.15),
-#                  seq(-0.1, 0.5, by = 0.1),
-#                  seq(0.7, 2, by = 0.3),
-#                  3, 5, 10, 20, 50)
-# rhoGrid_VAE <- c(seq(-0.8, -0.2, by = 0.2),
-#                  seq(-0.1, 0.5, by = 0.1),
-#                  seq(0.7, 3, by = 0.3),
-#                  4, 6, 10, 20)
+rhoGrid_KL  <- c(seq(-0.9, -0.15, by = 0.15),
+                 seq(-0.1, 0.5, by = 0.1),
+                 seq(0.7, 2, by = 0.3),
+                 3, 5, 10, 20, 50)
+rhoGrid_VAE <- c(seq(-0.8, -0.2, by = 0.2),
+                 seq(-0.1, 0.5, by = 0.1),
+                 seq(0.7, 3, by = 0.3),
+                 4, 6, 10, 20)
 
 # Stage 2 grid (refined)
-rhoGrid_KL  <- c(seq(-0.7, -0.125, by = 0.05),
-                 seq(-0.123, 0.45, by = 0.02),
-                 seq(0.55, 1.9, by = 0.1),
-                 seq(1.95, 16.5, by = 0.5))
-
-rhoGrid_VAE <- c(seq(-0.5, 0.05, by = 0.05),
-                 seq(0.07, 0.85, by = 0.02),
-                 seq(0.95, 2.5, by = 0.1),
-                 seq(3, 7, by = 0.5))
+# rhoGrid_KL  <- c(seq(-0.90, -0.60, by = 0.10),
+#                  seq(-0.60, 0.20, by = 0.03),
+#                  seq(0.20, 1.90, by = 0.05),
+#                  seq(1.90, 5.00, by = 0.20),
+#                  seq(2.00, 21.00, by = 0.50))
+# 
+# rhoGrid_VAE <- c(seq(-0.72, -0.40, by = 0.08),
+#                  seq(-0.40, 0.80, by = 0.03),
+#                  seq(0.80, 2.50, by = 0.06),
+#                  seq(2.50, 6.50, by = 0.20),
+#                  seq(6.50, 10.00, by = 0.50))
 
 # Test grid. Very coarse for debugging and testing, not for estimation
 # rhoGrid_KL <- c(seq(-0.5, 1, by = 0.25))
 # rhoGrid_VAE <- c(seq(-0.5, 1, by = 0.25))
+
+# Grid sorting and rounding
+rhoGrid_KL <- sort(unique(round(rhoGrid_KL, 4)))
+rhoGrid_VAE <- sort(unique(round(rhoGrid_VAE, 4)))
 
 #### FUNCTIONS ####
 
@@ -166,9 +174,9 @@ extract_grid_coeffs <- function(fit_sub) {
     if (length(ix) == 0) NA_integer_ else ix[1] # return first matching index or NA if empty
   }
   col_est <- pick_col("^(estimate|coef|value)$|^estimate$|^coef$|^coeff")
-  col_se  <- pick_col("(std\\.? ?error|se)")
-  col_t   <- pick_col("^(t.?value|z|t)$")
-  col_p   <- pick_col("^(pr\\(|p.?value|p$)")
+  col_se <- pick_col("(std\\.? ?error|se)")
+  col_t <- pick_col("^(t.?value|z|t)$")
+  col_p <- pick_col("^(pr\\(|p.?value|p$)")
   
   # flexible rows for various names of the parameters across solvers
   pick_row <- function(patterns, exclude = NULL) {
@@ -186,11 +194,11 @@ extract_grid_coeffs <- function(fit_sub) {
     }
     if (length(ok) == 0L) NA_integer_ else ok[1]
   }
-  r_gamma     <- pick_row("^gamma$")
-  r_lambda    <- pick_row("^lambda|^lam$")
-  r_delta1    <- pick_row("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
+  r_gamma <- pick_row("^gamma$")
+  r_lambda <- pick_row("^lambda|^lam$")
+  r_delta1 <- pick_row("^delta[_ ]?1$|^delta-?1$|delta[_]?kl")
   r_deltaMain <- pick_row("^delta$", exclude = "1")
-  r_nu        <- pick_row("^nu$")
+  r_nu <- pick_row("^nu$")
   
   get_val <- function(ri, ci) {
     if (is.na(ri) || is.na(ci)) return(NA_real_)
@@ -311,8 +319,8 @@ extract_grid_coeffs <- function(fit_sub) {
     t_nu = tval$nu,
     p_gamma = pval$gamma,
     p_lambda = pval$lambda,
-    p_delta_KVA  = pval$delta_KVA,
-    p_delta_VAY  = pval$delta_VAY,
+    p_delta_KVA = pval$delta_KVA,
+    p_delta_VAY = pval$delta_VAY,
     p_nu = pval$nu,
     # Newly calculated confidence intervals once the data has been placed in the table
     ci_lo_gamma = ifelse(is.finite(est$gamma) & is.finite(se$gamma), est$gamma - 1.96*se$gamma, NA_real_),
@@ -375,8 +383,10 @@ if (isTRUE(RUN_ESTIMATION)) {
     # Terribly slow: SANN, DE, CG
     
     # Choose the optimisation methods to use. Two options here.
-    opt_methods <- unique(c("Newton", "L-BFGS-B", "BFGS"))
-    # opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
+    # Sage 1
+    opt_methods <- unique(c("LM", "NM", "Nelder-Mead", "BFGS", "PORT", "Newton", "CG", "L-BFGS-B", "SANN", "DE"))
+    # Stage 2
+    # opt_methods <- unique(c("Newton", "L-BFGS-B"))
     
     # Setting up objects to store the estimations by method
     fit_all <- setNames(vector("list", length(opt_methods)), opt_methods)
@@ -863,118 +873,214 @@ add_validity <- function(df) {
     mutate(
       across(
         any_of(c("delta_KVA","delta_VAY","gamma","nu","lambda")),
-        ~ suppressWarnings(as.numeric(.))
+        ~ suppressWarnings(as.numeric(.)) # Force to be numeric
       ),
       
+      # Solver level convergence
+      converged = isTRUE(conv) | (is.logical(conv) & conv),
+      
+      # Validity based on statistical values of the grid point model
+      valid_stat = is.finite(rss) & rss > 0 &
+                   is.finite(R2) & R2 > 0 & R2 <= 1,
+      
+      # Economically plausible validity
+      valid_econ = 
+        is.finite(delta_KVA) & between(delta_KVA, 0, 1) &
+        is.finite(delta_VAY) & between(delta_VAY, 0, 1) &
+        is.finite(gamma) & between(gamma, 0.5, 3) &
+        is.finite(nu) & between(nu, 0.7, 1.3) &
+        is.finite(lambda) & between(lambda, -0.05, 0.05),
+      
+      # Validity based on the convergence, statistical value validity and economically plausible parameter validity
+      valid = converged & valid_stat & valid_econ,
+      
+      # Strict range economically plausible validity
+      valid_strict =
+        valid &
+        between(delta_KVA, 0.2, 0.8) &
+        between(delta_VAY, 0.2, 0.8) &
+        !on_edge_KL &
+        !on_edge_VAE,
+      
+      # high-level “which filter failed”
+      solver_issue = !converged,
+      stat_issue = converged & !valid_stat,
+      econ_issue = converged & valid_stat & !valid_econ,
+      
+      # Structured solver_reason from 'msg'
+      solver_reason = case_when(
+        converged %in% TRUE ~ "Valid",
+        is.na(msg) | msg == "" ~ "Unspecified",
+        grepl("false|relative|singular", msg, ignore.case = TRUE) %in% TRUE ~ "False convergence",
+        grepl("max", msg, ignore.case = TRUE) %in% TRUE ~ "Max iterations",
+        grepl("tol|bounds", msg, ignore.case = TRUE) %in% TRUE ~ "Bounds/tolerance",
+        grepl("reduction", msg, ignore.case = TRUE) %in% TRUE ~ "Reduction criterion",
+        TRUE ~ "Unspecified"
+        ),
+
+      # Translating to readable generic validity reasons
       valid_reason = pmap_chr( # readable column with grid-values of why something is invalid
-        list(conv, rss, R2, delta_KVA, delta_VAY, gamma, nu, lambda), # list of checked parameters and statistics
-        function(conv, rss, R2, dK, dV, g, n, lam) { # shorter renaming
+        list(converged, rss, R2, delta_KVA, delta_VAY, gamma, nu, lambda), # list of checked parameters and statistics
+        function(conv, rss, R2, delta_KVA, delta_VAY, gamma, nu, lambda) { 
           reasons <- c()
           
           if (!isTRUE(conv)) reasons <- c(reasons, "Solver did not converge")
           if (!is.finite(rss) || rss <= 0) reasons <- c(reasons, "RSS invalid")
           if (!is.finite(R2) || R2 <= 0 || R2 > 1) reasons <- c(reasons, "R2 invalid")
-          if (!is.finite(dK) || dK < 0 || dK > 1) reasons <- c(reasons, "dK-VA out of [0,1]")
-          if (!is.finite(dV) || dV < 0 || dV > 1) reasons <- c(reasons, "dVA-Y out of [0,1]")
-          if (!is.finite(g) || g < 0.5 || g > 3) reasons <- c(reasons, "gamma out of [0.5,3]")
-          if (!is.finite(n) || n < 0.7 || n > 1.3) reasons <- c(reasons, "v out of [0.7,1.3]")
-          if (!is.finite(lam) || lam < -0.05 || lam > 0.05) reasons <- c(reasons, "lambda out of [-0.05,0.05]")
+          if (!is.finite(delta_KVA) || delta_KVA < 0 || delta_KVA > 1) reasons <- c(reasons, "dK-VA out of [0,1]")
+          if (!is.finite(delta_VAY) || delta_VAY < 0 || delta_VAY > 1) reasons <- c(reasons, "dVA-Y out of [0,1]")
+          if (!is.finite(gamma) || gamma < 0.5 || gamma > 3) reasons <- c(reasons, "gamma out of [0.5,3]")
+          if (!is.finite(nu) || nu < 0.7 || nu > 1.3) reasons <- c(reasons, "v out of [0.7,1.3]")
+          if (!is.finite(lambda) || lambda < -0.05 || lambda > 0.05) reasons <- c(reasons, "lambda out of [-0.05,0.05]")
           
-          if (length(reasons) == 0) "OK" else paste(reasons, collapse = "; ") # no invalid reason found, then we flag "OK"
+          if (length(reasons) == 0) "OK" else paste(reasons, collapse = "; ") 
         }
       ),
-      
-      valid = valid_reason == "OK", # valid estimations are those flagged as "OK"
       
       # Status combines solver and validity info into one
       status = case_when(
         valid ~ "Valid",
-        !conv ~ "Solver did not converge",
-        valid_reason != "OK" ~ valid_reason,
+        # solver failed, why?
+        !converged & solver_reason != "Valid" ~ solver_reason,
+        # solver ok, statistical failure, why?
+        grepl("RSS invalid", valid_reason) ~ "RSS invalid",
+        grepl("R2 invalid", valid_reason) ~ "R2 invalid",
+        # solver & statistics ok, economic failure, why?
+        grepl("dK-VA", valid_reason) ~ "dK-VA out of [0,1]",
+        grepl("dVA-Y", valid_reason) ~ "dVA-Y out of [0,1]",
+        grepl("gamma out", valid_reason) ~ "gamma out of [0.5,3]",
+        grepl("v out", valid_reason) ~ "v out of [0.7,1.3]",
+        grepl("lambda out", valid_reason) ~ "lambda out of [-0.05,0.05]",
         TRUE ~ "Unspecified"
       ),
       
       status = factor(
         status,
         levels = c(
-          "False convergence","Max iterations","Reduction criterion",
-          "Bounds/tolerance","Unspecified",
-          "RSS invalid","R2 invalid",
-          "dK-VA out of [0,1]","dVA-Y out of [0,1]",
-          "gamma out of [0.5,3]","v out of [0.7,1.3]","lambda out of [-0.05,0.05]",
+          # solver-level reasons
+          "False convergence",
+          "Max iterations",
+          "Bounds/tolerance",
+          "Reduction criterion",
+          # statistical failures
+          "RSS invalid",
+          "R2 invalid",
+          # economic failures
+          "dK-VA out of [0,1]",
+          "dVA-Y out of [0,1]", 
+          "gamma out of [0.5,3]",
+          "v out of [0.7,1.3]",
+          "lambda out of [-0.05,0.05]",
+          # residual
+          "Unspecified",
           "Valid"
         )
       )
+      
     )
 }
 
   
-# Remove previous validity columns and re-do with add_validity
-results_grid <- results_grid %>% select(-any_of("valid")) %>% add_validity()
+# REbuild with validity columns for the whole grid
+results_grid <- results_grid %>% add_validity()
 
-# Valid runs table. Making a subset with only valid estimations
-results_grid_valid <- results_grid %>% filter(valid)
-
-# Invalid runs table. Making a subset with only invalid estimations
-results_grid_invalid <- results_grid %>% filter(!valid)
-
-# Best method per region
-# Strict criteria
-best_methods <- results_grid %>%
-  mutate(validity = ifelse(valid, "valid", "invalid")) %>% 
-  filter(valid, # valid run
-         is.finite(R2), R2 > 0.7, # reasonably high goodness of fit
-         is.finite(delta_KVA) & delta_KVA >= 0.2 & delta_KVA <= 0.8 &  # delta KVA within 0.2-0.8
-         is.finite(delta_VAY) & delta_VAY >= 0.2 & delta_VAY <= 0.8 &  # delta VAY within 0.2-0.8
-         rho_KL < 50 & rho_VAE < 50 # no extreme values of rho
-         ) %>%
+# Valid runs table. Making a subset with only valid estimations and adding model difference in AICc
+results_grid_valid <- results_grid %>% 
+  filter(valid) %>%
   group_by(r) %>%
-  arrange(AICc_plusRho, rss, desc(R2)) %>%
+  mutate(
+    valid_estimations = n(),
+    dAICc = AICc_plusRho - min(AICc_plusRho, na.rm = TRUE),
+    wAICc_raw = exp(-0.5 * dAICc)
+  ) %>%
+  ungroup()
+
+
+# Model-average best methods
+dAICcmin <- 4
+
+best_methods_average <- results_grid_valid %>%
+  group_by(r) %>%
+  mutate(
+    any_valid_strict = any(valid_strict, na.rm = TRUE),
+    any_strict_support = any(valid_strict & dAICc <= dAICcmin, na.rm = TRUE),
+    any_support = any(dAICc <= dAICcmin, na.rm = TRUE),
+    support_mode = case_when(
+      any_support & any_strict_support ~ "strong AICc support", # dAICc <= 4 AND at least one strict
+      any_support & !any_strict_support ~ "some AICc support", # dAICc <= 4 but no strict inside support
+      !any_support ~ "AICc min support", # no dAICc <= 4 → fallback to min
+      TRUE ~ "AICc min support" # safety catch
+    )
+  ) %>%
+  # 1) Keep only rows belonging to the chosen support set for that region
+  filter(
+    (support_mode %in% c("strong AICc support", "some AICc support") & dAICc <= dAICcmin) |
+      (support_mode == "AICc min support" & dAICc == min(dAICc, na.rm = TRUE))
+  ) %>%
+  # 2) If support_mode is strong AICc support, keep only strict points
+  filter(
+    support_mode != "strong AICc support" | valid_strict
+  ) %>%
+  group_by(r, support_mode) %>%
+  # 3) Renormalise AICc weights within the final averaging set
+  mutate(
+    wAICc = wAICc_raw/sum(wAICc_raw, na.rm = TRUE),
+    avg_estimations = n(), # grid points actually used in averaging
+    valid_estimations = first(valid_estimations),  # total valid grid points in region
+    share_valid = avg_estimations/valid_estimations
+  ) %>%
+  summarise(
+    # model-averaged parameters (AICc weights)
+    gamma = sum(wAICc*gamma, na.rm = TRUE),
+    delta_KVA = sum(wAICc*delta_KVA, na.rm = TRUE),
+    delta_VAY = sum(wAICc*delta_VAY, na.rm = TRUE),
+    nu = sum(wAICc*nu, na.rm = TRUE),
+    lambda = sum(wAICc*lambda, na.rm = TRUE),
+    rho_KL = sum(wAICc*rho_KL, na.rm = TRUE),
+    rho_VAE = sum(wAICc*rho_VAE, na.rm = TRUE),
+    sigma_KL = 1/(1 + rho_KL),
+    sigma_VAE = 1/(1 + rho_VAE),
+    avg_estimations = first(avg_estimations),
+    valid_estimations = first(valid_estimations),
+    share_valid = first(share_valid),
+    .groups = "drop"
+  )
+
+
+
+best_methods <- results_grid %>%
+  mutate(
+    tier = case_when(
+      valid_strict ~ "strict-valid",
+      valid ~ "valid",
+      converged & is.finite(R2) & R2 > 0 ~ "conv-only",
+      TRUE ~ "any"
+    ),
+    tier_rank = factor(tier, levels = c("strict-valid","valid","conv-only","any")),
+    aicc_rank = if_else(is.finite(AICc_plusRho), AICc_plusRho, Inf),
+    rss_rank = if_else(is.finite(rss), rss, Inf),
+    R2_rank = if_else(is.finite(R2), R2, -Inf)
+  ) %>%
+  group_by(r) %>%
+  arrange(
+    tier_rank,
+    aicc_rank,
+    rss_rank,
+    desc(R2_rank)
+    ) %>%
   slice_head(n = 1) %>%
   ungroup() %>%
-  mutate(best_tier = "strict")
+  mutate(best_tier = as.character(tier_rank))
 
-# Relaxed criteria, valid runs regardless of goodness of fit, to ensure each region gets candidate results
-still_missing <- setdiff(unique(results_grid$r), unique(best_methods$r))
-if (length(still_missing) > 0) {
-  best_relaxed <- results_grid %>%
-    mutate(validity = ifelse(valid, "valid", "invalid")) %>%
-    filter(r %in% still_missing, valid) %>%
-    group_by(r) %>%
-    filter(!on_edge_KL & !on_edge_VAE) %>%
-    arrange(AICc_plusRho, rss, desc(R2)) %>%
-    slice_head(n = 1) %>%
-    ungroup() %>%
-    mutate(best_tier = "relaxed")
-  
-  best_methods <- bind_rows(best_methods, best_relaxed) %>%
-    distinct(r, .keep_all = TRUE)
-}
 
-# Forced criteria, first near-valid ranges and if not, arranged by goodness of fit regardless of range
-still_missing <- setdiff(unique(results_grid$r), unique(best_methods$r))
-if (length(still_missing) > 0) {
-  best_forced <- results_grid %>%
-    mutate(validity = ifelse(valid, "valid", "invalid")) %>%
-    filter(r %in% still_missing) %>%
-    group_by(r) %>%
-    mutate(
-      near_valid = (
-        between(delta_KVA, 0.02, 0.98) &
-          between(delta_VAY, 0.02, 0.98) &
-          between(gamma, 0.1, 100) &
-          between(nu, 0.3, 10) &
-          between(lambda, -0.5, 0.5)
-      )
-    ) %>%
-    arrange(desc(near_valid), AICc_plusRho, rss, desc(R2), runtime_total) %>%
-    slice_head(n = 1) %>%
-    ungroup() %>%
-    mutate(best_tier = "forced")
+best_methods_AICc <- results_grid_valid %>%
+  group_by(r) %>%
+  filter(dAICc == min(dAICc, na.rm = TRUE)) %>%
+  slice_head(n = 1) %>%
+  ungroup()
 
-  best_methods <- bind_rows(best_methods, best_forced) %>%
-    distinct(r, .keep_all = TRUE)
-}
+
+
 
 
 # Median valid parameters
@@ -1040,16 +1146,6 @@ robustness_summary <- results_grid %>%
 
 
 
-# AICc weights (among valid only)
-aic_weights <- results_grid %>%
-  filter(valid, is.finite(AICc_plusRho)) %>%
-  group_by(r) %>%
-  mutate(
-    dAICc = AICc_plusRho - min(AICc_plusRho, na.rm = TRUE),
-    wAICc = exp(-0.5*dAICc)/sum(exp(-0.5*dAICc), na.rm = TRUE)
-  ) %>%
-  ungroup()
-
 
 # Share of grid converged
 grid_conv_share <- results_grid %>%
@@ -1084,12 +1180,13 @@ iam_table <- best_methods %>%
 
 
 
-# ---- EXPORT derived artifacts ----
+
+# ---- EXPORT derived datasets ----
 #write_csv(convergence_summary, "CES_convergence_summary.csv")
 write_csv(best_methods, "CES_best_methods.csv")
+write_csv(best_methods_average, "CES_best_methods_average.csv")
 write_csv(results_grid, "CES_results_grid.csv")
 #write_csv(results_grid_valid, "CES_results_grid_valid.csv")
-#write_csv(results_grid_invalid, "CES_results_grid_invalid.csv")
 write_csv(robustness_summary, "CES_robustness_summary.csv")
 #write_csv(aic_weights, "CES_AICc_weights.csv")
 write_csv(grid_conv_share, "CES_grid_convergence_share.csv")

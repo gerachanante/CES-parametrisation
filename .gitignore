@@ -1,4 +1,9 @@
-fine grid/CES_gridsearch.csv
 *.csv
 *.rds
 CES analysis.xlsx
+*.RData
+Figures.pptx
+CES analysis.xlsx
+stage2/.RDataTmp
+CES analysis.xlsx
+Figures.pptx
